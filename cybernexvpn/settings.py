@@ -14,6 +14,8 @@ import environ
 import dj_database_url
 from pathlib import Path
 
+from yookassa import Configuration
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -148,7 +150,10 @@ BASE_URL = env.str("BASE_URL", "http://localhost:8000")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+YOOKASSA_OAUTH_TOKEN = env.str("YOOKASSA_OAUTH_TOKEN")
+Configuration.configure_auth_token(YOOKASSA_OAUTH_TOKEN)
 
 # Variables
+TG_BOT_URL = env.str("TG_BOT_URL")
 START_BALANCE = env.int("START_PRICE", 100)
 DEFAULT_SUBSCRIPTION_PRICE = env.int("DEFAULT_SUBSCRIPTION_PRICE", 100)

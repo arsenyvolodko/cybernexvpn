@@ -3,12 +3,14 @@ from drf_spectacular.views import SpectacularSwaggerView, SpectacularRedocView, 
 
 from nexvpn.api.admin.views.client import ClientsViewSet, reactivate_client, get_config_file, get_qr_file
 from nexvpn.api.admin.views.server import ListServersView
-from nexvpn.api.admin.views.transactions import get_transactions_history
+from nexvpn.api.admin.views.payment import get_transactions_history, create_payment
 from nexvpn.api.admin.views.user import UsersViewSet
 
 urlpatterns = [
     path("users/<int:user_id>/", UsersViewSet.as_view({'get': 'retrieve', 'post': 'create'})),
-    path("users/<int:user_id>/transactions-history/", get_transactions_history),
+
+    path("users/<int:user_id>/payments/", create_payment),
+    path("users/<int:user_id>/payments/history/", get_transactions_history),
 
     path("users/<int:user_id>/clients/", ClientsViewSet.as_view({'get': 'list', 'post': 'create'})),
     path("users/<int:user_id>/clients/<int:client_id>/", ClientsViewSet.as_view({'get': 'retrieve', 'patch': 'partial_update', 'delete': 'destroy'})),

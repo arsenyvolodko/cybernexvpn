@@ -1,3 +1,5 @@
+import uuid
+
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -8,7 +10,7 @@ from django.db.models import Model
 from django.utils.timezone import now
 from wireguard_tools import WireguardKey
 
-from nexvpn.enums import PaymentStatusEnum, TransactionTypeEnum, ClientTypeEnum
+from nexvpn.enums import TransactionTypeEnum, ClientTypeEnum, TransactionStatusEnum
 
 User = get_user_model()
 
@@ -130,11 +132,7 @@ class Endpoint(models.Model):
 class Payment(models.Model):
     uuid = models.UUIDField(primary_key=True)
     user = models.ForeignKey(NexUser, on_delete=models.CASCADE)
-    status = models.CharField(
-        max_length=31,
-        choices=PaymentStatusEnum.choices,
-        default=PaymentStatusEnum.PENDING,
-    )
+    idempotency_key = models.UUIDField()
     created_at = models.DateTimeField(auto_now_add=True)
 
 
@@ -145,11 +143,17 @@ class Transaction(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     payment = models.OneToOneField(Payment, on_delete=models.CASCADE, null=True, default=None)
     type = models.CharField(max_length=31, choices=TransactionTypeEnum.choices)
+    status = models.CharField(
+        max_length=31,
+        choices=TransactionStatusEnum.choices,
+        default=TransactionStatusEnum.SUCCEEDED,
+    )
 
     def __str__(self):
         timestamp = self.created_at.strftime(format="%d.%m.%Y %H:%M:%S")
-        credit_type = ("Пополнение" if self.is_credit else "Списание")
-        return f"{timestamp}: {credit_type} в размере {self.value}₽ - {self.get_type_display()}"
+        credit_type = "Пополнение" if self.is_credit else "Списание"
+        status, type_ = self.get_status_display(), self.get_type_display()
+        return f"{timestamp}: {credit_type} в размере {self.value}₽ - [{status}] - {type_}."
 
 
 class UserBalance(models.Model):

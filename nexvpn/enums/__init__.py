@@ -1,3 +1,3 @@
-from .payment_status_enum import PaymentStatusEnum
+from .transaction_status_enum import TransactionStatusEnum
 from .transaction_type_enum import TransactionTypeEnum
 from .client_type_enum import ClientTypeEnum

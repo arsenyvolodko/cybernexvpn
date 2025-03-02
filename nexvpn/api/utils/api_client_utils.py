@@ -1,3 +1,8 @@
+from typing import Any
+
+from django.conf import settings
+from yookassa import Payment
+
 from nexvpn.clients.schemas import ConfigSchema, CreateClientRequest
 from nexvpn.clients.wg_api_client import WgAPIClient
 from nexvpn.models import Client, ServerConfig
@@ -32,3 +37,17 @@ def gen_client_config_data(client: Client) -> str:
         f"Endpoint = {server_config.ip}:{server_config.wg_listen_port}"
     )
     return file_data
+
+
+def gen_yookassa_payment_data(value: int) -> dict[str, Any]:
+    payment_data = {
+        "amount": {"value": f"{value}.00", "currency": "RUB"},
+        "confirmation": {
+            "type": "redirect",
+            "return_url": settings.TG_BOT_URL,
+        },
+        "capture": True,
+        "description": f"Пополнение баланса на {value} рублей"
+    }
+
+    return payment_data
