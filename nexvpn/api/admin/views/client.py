@@ -1,11 +1,16 @@
 import asyncio
 import logging
+import os
+import tempfile
 
+import qrcode
 from dateutil.relativedelta import relativedelta
 from django.db import transaction
 from django.db.models import QuerySet
+from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils.timezone import now
+from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.request import Request
@@ -17,11 +22,12 @@ from nexvpn.api.exceptions.base_client_error import BaseClientError
 from nexvpn.api.exceptions.enums.error_message_enum import ErrorMessageEnum
 from nexvpn.api.exceptions.no_free_endpoints_error import NoFreeEndpoints
 from nexvpn.clients.schemas import CreateClientRequest
-from nexvpn.clients.utils import add_client, delete_client, get_config_schema
+from nexvpn.api.utils.api_client_utils import add_client, delete_client, get_config_schema, gen_client_config_data
 from nexvpn.enums import TransactionTypeEnum
 from nexvpn.models import Client, UserBalance, Endpoint, Transaction, NexUser
 
 
+@extend_schema(tags=["client"])
 class ClientsViewSet(ModelViewSet):
     queryset = Client.objects.all()
     serializer_class = ClientSerializer
@@ -50,6 +56,10 @@ class ClientsViewSet(ModelViewSet):
                 raise NoFreeEndpoints()
 
             user_balance = UserBalance.objects.select_for_update().get(user=user)
+            if user_balance.value < server.price:
+                raise BaseClientError(
+                    ErrorMessageEnum.NOT_ENOUGH_MONEY_TO_ADD_CLIENT_ERROR_MESSAGE.value
+                )
             user_balance.value -= server.price
             user_balance.save()
 
@@ -98,6 +108,7 @@ class ClientsViewSet(ModelViewSet):
         return Response(data, status=status.HTTP_400_BAD_REQUEST)
 
 
+@extend_schema(tags=["client"])
 @api_view(["POST"])
 def reactivate_client(request: Request, user_id: int, client_id: int) -> Response:  # noqa
     client = get_object_or_404(Client, pk=client_id, user_id=user_id)
@@ -108,10 +119,15 @@ def reactivate_client(request: Request, user_id: int, client_id: int) -> Respons
                 ErrorMessageEnum.CLIENT_IS_ALREADY_ACTIVE_ERROR_MESSAGE.value
             )
 
-        user_balance = UserBalance.objects.select_for_update().get(user_id=user_id)
-
         with transaction.atomic():
             price = client.server.price
+
+            user_balance = UserBalance.objects.select_for_update().get(user_id=user_id)
+            if user_balance.value < price:
+                raise BaseClientError(
+                    ErrorMessageEnum.NOT_ENOUGH_MONEY_TO_ADD_CLIENT_ERROR_MESSAGE.value
+                )
+
             user_balance.value -= price
             user_balance.save()
 
@@ -141,3 +157,29 @@ def reactivate_client(request: Request, user_id: int, client_id: int) -> Respons
         logging.error(f"Error reactivating client: {e}", exc_info=True)
 
     return Response(data, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(tags=["client"])
+@api_view(["GET"])
+def get_config_file(request: Request, user_id: int, client_id: int) -> FileResponse:
+    client = get_object_or_404(Client, pk=client_id, user_id=user_id)
+    client_data = gen_client_config_data(client)
+
+    with tempfile.NamedTemporaryFile(mode="w+", delete=True) as temp_file:
+        temp_file.write(client_data)
+        temp_file.flush()
+        response = FileResponse(open(temp_file.name, "rb"), as_attachment=True, filename=f"{client.name}.conf")
+        return response
+
+
+@extend_schema(tags=["client"])
+@api_view(["GET"])
+def get_qr_file(request: Request, user_id: int, client_id: int) -> FileResponse:
+    client = get_object_or_404(Client, pk=client_id, user_id=user_id)
+    client_data = gen_client_config_data(client)
+
+    with tempfile.NamedTemporaryFile(mode="wb+", delete=True) as temp_file:
+        qr = qrcode.make(client_data)
+        qr.save(temp_file)
+        response = FileResponse(open(temp_file.name, "rb"), as_attachment=True, content_type="image/png")
+        return response

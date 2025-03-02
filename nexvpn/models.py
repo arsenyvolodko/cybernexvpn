@@ -18,6 +18,13 @@ class NexUser(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     user = models.OneToOneField(User, null=True, default=None, on_delete=models.SET_NULL, blank=True)
 
+    @property
+    def balance(self):
+        return UserBalance.objects.get(user=self).value
+
+    def __str__(self):
+        return self.username or str(self.user_id)
+
 
 class UserInvitation(models.Model):
     inviter = models.ForeignKey(
@@ -42,6 +49,11 @@ class ServerConfig(models.Model):
     def base_url(self) -> str:
         protocol = "https" if self.ssl else "http"
         return f"{protocol}://{self.ip}:{self.api_port}/api/v1"
+
+    @property
+    def wg_public_key(self) -> str:
+        # noinspection PyTypeChecker
+        return str(WireguardKey(self.wg_private_key).public_key())
 
 
 class Server(models.Model):
@@ -95,11 +107,17 @@ class Client(BaseClient):
                 self.private_key = str(WireguardKey.generate())
         super().save(*args, **kwargs)
 
+    def __str__(self):
+        return f"{self.user} - {self.num}"
+
 
 class Endpoint(models.Model):
     server = models.ForeignKey(Server, on_delete=models.CASCADE)
     ip = models.CharField(max_length=17)
     client = models.OneToOneField(Client, on_delete=models.SET_NULL, null=True, default=None, related_name="endpoint", blank=True)
+
+    def __str__(self):
+        return f"{self.client} - {self.server.name}: {self.ip}"
 
     class Meta:
         constraints = [
@@ -128,10 +146,18 @@ class Transaction(models.Model):
     payment = models.OneToOneField(Payment, on_delete=models.CASCADE, null=True, default=None)
     type = models.CharField(max_length=31, choices=TransactionTypeEnum.choices)
 
+    def __str__(self):
+        timestamp = self.created_at.strftime(format="%d.%m.%Y %H:%M:%S")
+        credit_type = ("Пополнение" if self.is_credit else "Списание")
+        return f"{timestamp}: {credit_type} в размере {self.value}₽ - {self.get_type_display()}"
+
 
 class UserBalance(models.Model):
     user = models.OneToOneField(NexUser, on_delete=models.CASCADE)
     value = models.IntegerField(default=settings.START_BALANCE)
+
+    def __str__(self):
+        return f"{self.user.username or self.user_id}: {self.value}₽"
 
     class Meta:
         constraints = [
