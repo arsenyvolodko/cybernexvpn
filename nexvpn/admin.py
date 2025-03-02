@@ -3,7 +3,6 @@ from django.contrib import admin
 from nexvpn.models import NexUser, UserInvitation, ServerConfig, Server, Client, Endpoint, Payment, Transaction, \
     UserBalance
 
-# Register your models here.
 admin.site.register(NexUser)
 admin.site.register(UserInvitation)
 admin.site.register(ServerConfig)
