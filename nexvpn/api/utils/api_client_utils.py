@@ -1,10 +1,9 @@
 from typing import Any
 
 from django.conf import settings
-from yookassa import Payment
 
-from nexvpn.clients.schemas import ConfigSchema, CreateClientRequest
-from nexvpn.clients.wg_api_client import WgAPIClient
+from nexvpn.api_clients.schemas import ConfigSchema, CreateClientRequest
+from nexvpn.api_clients.wg_api_client import WgAPIClient
 from nexvpn.models import Client, ServerConfig
 
 

@@ -129,8 +129,7 @@ class Endpoint(models.Model):
 
 class Payment(models.Model):
     uuid = models.UUIDField(primary_key=True)
-    user = models.ForeignKey(NexUser, on_delete=models.CASCADE)
-    idempotency_key = models.UUIDField()
+    idempotence_key = models.UUIDField()
     created_at = models.DateTimeField(auto_now_add=True)
 
 

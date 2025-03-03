@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 import tempfile
 
 import qrcode
@@ -21,7 +20,7 @@ from nexvpn.api.admin.serializers.client_serializers import ClientSerializer
 from nexvpn.api.exceptions.base_client_error import BaseClientError
 from nexvpn.api.exceptions.enums.error_message_enum import ErrorMessageEnum
 from nexvpn.api.exceptions.no_free_endpoints_error import NoFreeEndpoints
-from nexvpn.clients.schemas import CreateClientRequest
+from nexvpn.api_clients.schemas import CreateClientRequest
 from nexvpn.api.utils.api_client_utils import add_client, delete_client, get_config_schema, gen_client_config_data
 from nexvpn.enums import TransactionTypeEnum
 from nexvpn.models import Client, UserBalance, Endpoint, Transaction, NexUser

@@ -1,13 +1,11 @@
-import logging
+from abc import ABC
 
 import aiohttp
 
-from nexvpn.clients import schemas
-
-logger = logging.getLogger(__name__)
+from nexvpn.api_clients import schemas
 
 
-class WgAPIClient:
+class BaseAPIClient(ABC):
 
     def __init__(self, config: schemas.ConfigSchema):
         self._base_url = config.url
@@ -29,11 +27,3 @@ class WgAPIClient:
         kwargs = {**request.model_dump(by_alias=True), "url": str(request.url)}
         async with self._session.request(**kwargs, timeout=self._timeout) as response:
             response.raise_for_status()
-
-    async def add_client(self, public_key: str, schema: schemas.CreateClientRequest) -> None:
-        request = schemas.Request(url=f"{self._base_url}/client/{public_key}", json=schema.model_dump(by_alias=True))
-        await self._make_request(request)
-
-    async def delete_client(self, public_key: str) -> None:
-        request = schemas.Request(url=f"{self._base_url}/client/{public_key}", method=schemas.Method.DELETE)
-        await self._make_request(request)

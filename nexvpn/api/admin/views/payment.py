@@ -1,6 +1,7 @@
 import logging
 import tempfile
 import uuid
+from datetime import timedelta
 
 import yookassa
 from django.db import transaction
@@ -9,9 +10,7 @@ from django.shortcuts import get_object_or_404
 from django.utils.timezone import now
 from drf_spectacular.utils import extend_schema
 from rest_framework.decorators import api_view
-from rest_framework.generics import CreateAPIView
 from rest_framework.response import Response
-from urllib3 import HTTPSConnectionPool
 from yookassa.domain.response import PaymentResponse
 
 from nexvpn.api.admin.serializers.payment_serializers import PaymentRequestSerializers, PaymentResponseSerializer
@@ -28,21 +27,36 @@ def create_payment(request, user_id: int) -> Response:
     serializer.is_valid(raise_exception=True)
 
     value = serializer.validated_data["value"]
+
+    old_transaction = Transaction.objects.filter(
+        user=user,
+        value=value,
+        status=TransactionStatusEnum.WAITING_FOR_CAPTURE,
+        created_at__gt=now() - timedelta(minutes=10),
+        payment__isnull=False
+    ).first()
+    existing_payment = old_transaction.payment if old_transaction else None
     payment_data = gen_yookassa_payment_data(value)
-    idempotency_key = uuid.uuid4()
     try:
         with transaction.atomic():
-            yookassa_payment: PaymentResponse = yookassa.Payment.create(payment_data, idempotency_key)
-            payment = Payment.objects.create(uuid=yookassa_payment.id, user=user, idempotency_key=idempotency_key)
-            Transaction.objects.create(
-                user=user,
-                is_credit=True,
-                value=value,
-                payment=payment,
-                type=TransactionTypeEnum.FILL_UP_BALANCE,
-                status=TransactionStatusEnum.WAITING_FOR_CAPTURE
-            )
 
+            if existing_payment:
+                idempotence_key = existing_payment.idempotence_key
+                yookassa_payment: PaymentResponse = yookassa.Payment.create(payment_data, idempotence_key)
+            else:
+                idempotence_key = uuid.uuid4()
+                yookassa_payment: PaymentResponse = yookassa.Payment.create(payment_data, idempotence_key)
+                payment = Payment.objects.create(uuid=yookassa_payment.id, idempotence_key=idempotence_key)
+                Transaction.objects.create(
+                    user=user,
+                    is_credit=True,
+                    value=value,
+                    payment=payment,
+                    type=TransactionTypeEnum.FILL_UP_BALANCE,
+                    status=TransactionStatusEnum.WAITING_FOR_CAPTURE
+                )
+            if yookassa_payment.status != 'pending':
+                raise Exception(f"Payment status is not pending")
             url = yookassa_payment.confirmation.confirmation_url
             response_serializer = PaymentResponseSerializer(data={"url": url})
             response_serializer.is_valid(raise_exception=True)
@@ -50,9 +64,9 @@ def create_payment(request, user_id: int) -> Response:
     except TypeError or AttributeError as e:
         error_msg = f"Cannot create yookassa payment:\npayment_data:{payment_data}\n{e}"
     except Exception as e:
-        error_msg = f"Cannot create yookassa payment:\n{e}"
+        error_msg = f"Cannot create yookassa payment:\n{e}\npayment_json: {yookassa_payment.json()}"
 
-    logging.error(error_msg, exc_info=True)
+    logging.error(error_msg, exc_info=True)  # noqa
     return Response({"detail": error_msg}, status=400)
 
 
