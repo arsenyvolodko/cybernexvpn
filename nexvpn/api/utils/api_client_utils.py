@@ -1,9 +1,10 @@
+import uuid
 from typing import Any
 
 from django.conf import settings
 
+from nexvpn.api_clients import WgAPIClient, TgBotAPIClient
 from nexvpn.api_clients.schemas import ConfigSchema, CreateClientRequest
-from nexvpn.api_clients.wg_api_client import WgAPIClient
 from nexvpn.models import Client, ServerConfig
 
 
@@ -17,9 +18,15 @@ async def add_client(config_schema: ConfigSchema, public_key: str, create_client
         await api_client.add_client(public_key, create_client_request)
 
 
-async def delete_client(config_schema, public_key: str):
+async def delete_client(config_schema: ConfigSchema, public_key: str):
     async with WgAPIClient(config_schema) as api_client:
         await api_client.delete_client(public_key)
+
+
+async def succeed_payment(payment_id: uuid):
+    config_schema = ConfigSchema(url=settings.TG_BOT_API_URL, api_key=settings.TG_BOT_API_KEY)
+    async with TgBotAPIClient(config_schema) as api_client:
+        await api_client.succeed_payment(payment_id)
 
 
 def gen_client_config_data(client: Client) -> str:

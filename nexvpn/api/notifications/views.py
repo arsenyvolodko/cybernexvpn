@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 
@@ -7,6 +8,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from yookassa.domain.notification import WebhookNotification
 
+from nexvpn.api.utils.api_client_utils import succeed_payment
 from nexvpn.enums import PaymentStatusEnum, TransactionStatusEnum
 from nexvpn.models import Payment, Transaction, UserBalance
 
@@ -54,5 +56,5 @@ def handle_notification(request: Request) -> Response:
         user_balance.value += payment_transaction.value
         user_balance.save()
 
-        # todo make request to bot
+        asyncio.run(succeed_payment(payment_id=payment.uuid))
         return Response(status=200)

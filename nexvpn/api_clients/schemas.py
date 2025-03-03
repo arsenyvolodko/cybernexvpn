@@ -1,4 +1,5 @@
 import enum
+import uuid
 from typing import Any, Self
 
 from pydantic import ConfigDict, Field, HttpUrl, SecretStr, field_serializer, model_validator

@@ -153,7 +153,10 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 YOOKASSA_OAUTH_TOKEN = env.str("YOOKASSA_OAUTH_TOKEN")
 Configuration.configure_auth_token(YOOKASSA_OAUTH_TOKEN)
 
-# Variables
 TG_BOT_URL = env.str("TG_BOT_URL")
+TG_BOT_API_URL = env.str("TG_BOT_API_URL")
+TG_BOT_API_KEY = env.str("TG_BOT_API_KEY")
+
+# Business Variables
 START_BALANCE = env.int("START_PRICE", 100)
 DEFAULT_SUBSCRIPTION_PRICE = env.int("DEFAULT_SUBSCRIPTION_PRICE", 100)
