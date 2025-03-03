@@ -11,6 +11,7 @@ from nexvpn.enums import TransactionTypeEnum
 from nexvpn.models import NexUser, UserBalance, Transaction
 
 
+@extend_schema(tags=["users"])
 class UsersViewSet(ModelViewSet):
     queryset = NexUser.objects.all()
     serializer_class = NexUserSerializer
