@@ -23,16 +23,17 @@ def handle_notification(request: Request) -> Response:
         return Response(status=400)
 
     if not (webhook.type == EXPECTED_WEBHOOK_TYPE and webhook.event in PaymentStatusEnum.values()):
-        return Response(status=400)
+        # Return 200 to YooKassa to avoid repeated requests
+        return Response(status=200)
 
     new_status = PaymentStatusEnum(value=webhook.event)
     payment_obj = webhook.object
 
     payment = Payment.objects.filter(id=payment_obj.id).first()
-    payment_transaction: Transaction = Transaction.objects.filter(payment__isnull=False, payment=payment).first()
+    payment_transaction = Transaction.objects.filter(payment__isnull=False, payment=payment).first()
 
     if not (payment and payment_transaction):
-        logging.info(f"Cannot process webhook. Payment or Transaction not found:\n"
+        logging.info(f"Cannot process webhook: payment or transaction not found:\n"
                      f"payment_id={payment_obj.id}, transaction_id={payment_transaction.id}.\n"
                      f"Webhook data: {payment_json}")
 
