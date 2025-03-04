@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from yookassa.domain.response import PaymentResponse
 
 from nexvpn.api.admin.serializers.payment_serializers import PaymentRequestSerializers, PaymentResponseSerializer
-from nexvpn.api.utils.api_client_utils import gen_yookassa_payment_data
+from nexvpn.utils import gen_yookassa_payment_data
 from nexvpn.enums import TransactionTypeEnum, TransactionStatusEnum
 from nexvpn.models import Transaction, NexUser, Payment
 

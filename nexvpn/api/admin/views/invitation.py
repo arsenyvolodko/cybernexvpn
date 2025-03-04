@@ -6,7 +6,7 @@ from rest_framework import status
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from nexvpn.api.admin.serializers.invitation_serializer import InvitationRequestSerializer
+from nexvpn.api.admin.serializers.invitation_serializers import InvitationRequestSerializer
 from nexvpn.enums import TransactionTypeEnum
 from nexvpn.models import NexUser, UserInvitation, UserBalance, Transaction
 

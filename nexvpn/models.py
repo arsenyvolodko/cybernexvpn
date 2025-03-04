@@ -114,7 +114,8 @@ class Client(BaseClient):
 class Endpoint(models.Model):
     server = models.ForeignKey(Server, on_delete=models.CASCADE)
     ip = models.CharField(max_length=17)
-    client = models.OneToOneField(Client, on_delete=models.SET_NULL, null=True, default=None, related_name="endpoint", blank=True)
+    client = models.OneToOneField(Client, on_delete=models.SET_NULL, null=True, default=None, related_name="endpoint",
+                                  blank=True)
 
     def __str__(self):
         return f"{self.client} - {self.server.name}: {self.ip}"
@@ -133,12 +134,53 @@ class Payment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 
+class PromoCode(models.Model):
+    value = models.IntegerField()
+    name = models.CharField(max_length=31, unique=True)
+    is_active = models.BooleanField(default=True)
+    public_access = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.name}: {self.value}₽"
+
+
+class UsedPromoCode(models.Model):
+    user = models.ForeignKey(NexUser, on_delete=models.CASCADE)
+    promo_code = models.ForeignKey(PromoCode, on_delete=models.CASCADE)
+
+    def __str__(self):
+        return f"{self.user} - {self.promo_code}"
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "promo_code"], name="unique_used_user_promo_code"
+            )
+        ]
+
+
+class AllowedUserPromoCode(models.Model):
+    user = models.ForeignKey(NexUser, on_delete=models.CASCADE)
+    promo_code = models.ForeignKey(PromoCode, on_delete=models.CASCADE, related_name="allowed_users")
+
+    def __str__(self):
+        return f"{self.user} - {self.promo_code}"
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "promo_code"], name="unique_allowed_user_promo_code"
+            )
+        ]
+
+
 class Transaction(models.Model):
     user = models.ForeignKey(NexUser, on_delete=models.CASCADE)
     is_credit = models.BooleanField()
     value = models.IntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
     payment = models.OneToOneField(Payment, on_delete=models.CASCADE, null=True, default=None)
+    promo_code = models.ForeignKey(PromoCode, on_delete=models.SET_NULL, null=True, default=None)
     type = models.CharField(max_length=31, choices=TransactionTypeEnum.choices)
     status = models.CharField(
         max_length=31,

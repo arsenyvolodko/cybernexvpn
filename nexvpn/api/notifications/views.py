@@ -8,7 +8,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from yookassa.domain.notification import WebhookNotification
 
-from nexvpn.api.utils.api_client_utils import succeed_payment
+from nexvpn.utils import succeed_payment
 from nexvpn.enums import PaymentStatusEnum, TransactionStatusEnum
 from nexvpn.models import Payment, Transaction, UserBalance
 

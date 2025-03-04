@@ -1,19 +1,15 @@
 import enum
-import uuid
-from typing import Any, Self
+from typing import Any
 
-from pydantic import ConfigDict, Field, HttpUrl, SecretStr, field_serializer, model_validator
-from pydantic import BaseModel as PydanticBaseModel
+from pydantic import Field, HttpUrl
+
+from cybernexvpn.base_model import BaseModel
+from nexvpn.enums import SubscriptionUpdateStatusEnum
 
 
 class Method(str, enum.Enum):
     POST = "POST"
     DELETE = "DELETE"
-
-
-class BaseModel(PydanticBaseModel):
-    class Config:
-        arbitrary_types_allowed = True
 
 
 class Request(BaseModel):
@@ -34,3 +30,21 @@ class ConfigSchema(BaseModel):
 
 class CreateClientRequest(BaseModel):
     ip: str
+
+
+class UpdateSubscriptionClient(BaseModel):
+    name: str
+    subscription_update: SubscriptionUpdateStatusEnum
+
+
+class UserSubscriptionUpdates(BaseModel):
+    user: int
+    renewed: list[str]
+    stopped_due_to_lack_of_funds: list[str]
+    stopped_due_to_offed_auto_renew: list[str]
+    deleted: list[str]
+
+
+class SubscriptionUpdates(BaseModel):
+    is_reminder: bool
+    updates: list[UserSubscriptionUpdates]
