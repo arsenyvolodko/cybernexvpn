@@ -20,7 +20,7 @@ from nexvpn.api.admin.serializers.client_serializers import ClientSerializer
 from nexvpn.api.exceptions.base_client_error import BaseClientError
 from nexvpn.api.exceptions.enums.error_message_enum import ErrorMessageEnum
 from nexvpn.api.exceptions.no_free_endpoints_error import NoFreeEndpoints
-from nexvpn.api_clients.schemas import CreateClientRequest
+from nexvpn.api_clients.wg_api_client.schemas import CreateClientRequest, DeleteClientRequest
 from nexvpn.utils import add_client, delete_client, get_config_schema, gen_client_config_data
 from nexvpn.enums import TransactionTypeEnum
 from nexvpn.models import Client, UserBalance, Endpoint, Transaction, NexUser
@@ -78,15 +78,16 @@ class ClientsViewSet(ModelViewSet):
             endpoint.save()
 
             config_schema = get_config_schema(client)
-            create_client_request = CreateClientRequest(ip=client.endpoint.ip)
-            asyncio.run(add_client(config_schema, client.public_key, create_client_request))
+            create_client_request = CreateClientRequest(ip=client.endpoint.ip, public_key=client.public_key)
+            asyncio.run(add_client(config_schema, create_client_request))
 
     def perform_destroy(self, instance: Client) -> None:
         with transaction.atomic():
             config_schema = get_config_schema(instance)
             public_key = instance.public_key
             instance.delete()
-            asyncio.run(delete_client(config_schema, public_key))
+            delete_client_request = DeleteClientRequest(public_key=public_key)
+            asyncio.run(delete_client(config_schema, delete_client_request))
 
     def create(self, request: Request, *args, **kwargs) -> Response:
         try:
@@ -143,8 +144,8 @@ def reactivate_client(request: Request, user_id: int, client_id: int) -> Respons
             client.save()
 
             config_schema = get_config_schema(client)
-            create_client_request = CreateClientRequest(ip=client.endpoint.ip)
-            asyncio.run(add_client(config_schema, client.public_key, create_client_request))
+            create_client_request = CreateClientRequest(ip=client.endpoint.ip, public_key=client.public_key)
+            asyncio.run(add_client(config_schema, create_client_request))
 
         return Response(status=status.HTTP_200_OK)
 

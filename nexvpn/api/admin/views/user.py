@@ -1,8 +1,6 @@
 from django.conf import settings
 from django.db import transaction
-from django.db.models import QuerySet
 from drf_spectacular.utils import extend_schema
-from rest_framework.generics import CreateAPIView
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 

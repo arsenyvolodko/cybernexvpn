@@ -2,4 +2,3 @@ from .transaction_status_enum import TransactionStatusEnum
 from .transaction_type_enum import TransactionTypeEnum
 from .payment_status_enum import PaymentStatusEnum
 from .client_type_enum import ClientTypeEnum
-from .subscription_update_status_enum import SubscriptionUpdateStatusEnum
