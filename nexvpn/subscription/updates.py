@@ -1,12 +1,17 @@
+import asyncio
 import datetime
+from collections import defaultdict
 
 from dateutil.relativedelta import relativedelta
 from django.utils.timezone import now
 
 from cybernexvpn.base_model import BaseModel
-from nexvpn.api_clients.schemas import ConfigSchema, UserSubscriptionUpdates, SubscriptionUpdates
+from nexvpn.api_clients.schemas import ConfigSchema
+from nexvpn.api_clients.tg_bot_api_client.schemas import UserSubscriptionUpdates, SubscriptionUpdates
+from nexvpn.api_clients.wg_api_client.schemas import DeleteClientsRequest, DeleteClientRequest
 from nexvpn.enums import TransactionTypeEnum, TransactionStatusEnum
-from nexvpn.models import Client, UserBalance, Transaction
+from nexvpn.models import Client, UserBalance, Transaction, Server
+from nexvpn.utils import delete_clients
 
 
 class ClientsSchema(BaseModel):
@@ -105,35 +110,46 @@ def handle_clients_to_delete(clients_to_delete: list[Client]):
 
 
 def delete_clients_from_server(client_to_delete: list[Client]):
-    servers = set(client.server for client in client_to_delete)
+    servers: set[Server] = set(client.server for client in client_to_delete)
+    server_id_clients: dict[int, list[Client]] = defaultdict(list)
+    for client in client_to_delete:
+        server_id_clients[client.server.id].append(client)
+
     for server in servers:
         config = server.config
+        clients = server_id_clients[server.id]
         config_schema = ConfigSchema(url=config.base_url, api_key=config.api_key)
-        # todo
+        delete_clients_request = DeleteClientsRequest(
+            clients=[DeleteClientRequest(public_key=client.public_key) for client in clients]
+        )
+        asyncio.run(delete_clients(config_schema, delete_clients_request))
 
 
-def handle_clients(user_id: int, client_schema: ClientsSchema):
+def handle_clients(user_id: int, client_schema: ClientsSchema) -> list[Client]:
     handle_clients_to_renew(user_id, client_schema.clients_to_renew)
     handle_clients_to_stop(user_id, client_schema.extra_clients_to_stop, due_to_lack_of_funds=True)
     handle_clients_to_stop(user_id, client_schema.clients_to_stop, due_to_lack_of_funds=False)
     handle_clients_to_delete(client_schema.clients_to_delete)
-    delete_clients_from_server(
-        client_schema.clients_to_stop + client_schema.extra_clients_to_stop + client_schema.clients_to_delete)
+    return client_schema.clients_to_stop + client_schema.extra_clients_to_stop + client_schema.clients_to_delete
 
 
 def get_updates_schema(date_time: datetime, is_reminder: bool) -> SubscriptionUpdates:
     users_subscriptions_updates: list[UserSubscriptionUpdates] = list()
 
+    clients_to_delete = []
     users_with_clients_to_update = get_users_with_clients_to_update(date_time)
+
     for user_id in users_with_clients_to_update:
         # todo: add transaction and handle user balance correctly
         client_schema: ClientsSchema = get_clients_by_groups(user_id, date_time)
 
         if not is_reminder:
-            handle_clients(user_id, client_schema)
+            clients_to_delete.extend(handle_clients(user_id, client_schema))
 
         user_updates: UserSubscriptionUpdates = get_response_schema(user_id, client_schema)
         users_subscriptions_updates.append(user_updates)
 
+    if clients_to_delete:
+        delete_clients_from_server(clients_to_delete)
     subscription_updates = SubscriptionUpdates(is_reminder=is_reminder, updates=users_subscriptions_updates)
     return subscription_updates
