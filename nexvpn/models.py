@@ -8,7 +8,7 @@ from django.db.models import Model
 from django.utils.timezone import now
 from wireguard_tools import WireguardKey
 
-from nexvpn.enums import TransactionTypeEnum, ClientTypeEnum, TransactionStatusEnum
+from nexvpn.enums import TransactionTypeEnum, ClientTypeEnum, TransactionStatusEnum, ClientUpdatesEnum
 
 User = get_user_model()
 
@@ -109,6 +109,17 @@ class Client(BaseClient):
 
     def __str__(self):
         return f"{self.user} - {self.num}"
+
+
+class ClientUpdates(models.Model):
+    user = models.ForeignKey(NexUser, on_delete=models.CASCADE)
+    client = models.ForeignKey(Client, on_delete=models.SET_NULL, null=True)
+    action = models.CharField(
+        max_length=63,
+        choices=ClientUpdatesEnum.choices
+    )
+    automatically = models.BooleanField()
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 class Endpoint(models.Model):

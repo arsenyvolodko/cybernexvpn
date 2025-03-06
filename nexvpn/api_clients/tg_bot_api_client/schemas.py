@@ -1,10 +1,4 @@
 from cybernexvpn.base_model import BaseModel
-from nexvpn.api_clients.tg_bot_api_client.enums import SubscriptionUpdateStatusEnum
-
-
-class UpdateSubscriptionClient(BaseModel):
-    name: str
-    subscription_update: SubscriptionUpdateStatusEnum
 
 
 class UserSubscriptionUpdates(BaseModel):

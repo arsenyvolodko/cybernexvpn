@@ -22,8 +22,8 @@ from nexvpn.api.exceptions.enums.error_message_enum import ErrorMessageEnum
 from nexvpn.api.exceptions.no_free_endpoints_error import NoFreeEndpoints
 from nexvpn.api_clients.wg_api_client.schemas import CreateClientRequest, DeleteClientRequest
 from nexvpn.utils import add_client, delete_client, get_config_schema, gen_client_config_data
-from nexvpn.enums import TransactionTypeEnum
-from nexvpn.models import Client, UserBalance, Endpoint, Transaction, NexUser
+from nexvpn.enums import TransactionTypeEnum, ClientUpdatesEnum
+from nexvpn.models import Client, UserBalance, Endpoint, Transaction, NexUser, ClientUpdates
 
 
 @extend_schema(tags=["client"])
@@ -74,6 +74,13 @@ class ClientsViewSet(ModelViewSet):
                 user=user
             )
 
+            ClientUpdates.objects.create(
+                user=client.user,
+                client=client,
+                action=ClientUpdatesEnum.CREATED,
+                automatically=False
+            )
+
             endpoint.client = client
             endpoint.save()
 
@@ -83,9 +90,18 @@ class ClientsViewSet(ModelViewSet):
 
     def perform_destroy(self, instance: Client) -> None:
         with transaction.atomic():
+
+            ClientUpdates.objects.create(
+                user=instance.user,
+                client=None,
+                action=ClientUpdatesEnum.DELETED,
+                automatically=False
+            )
+
             config_schema = get_config_schema(instance)
             public_key = instance.public_key
             instance.delete()
+
             delete_client_request = DeleteClientRequest(public_key=public_key)
             asyncio.run(delete_client(config_schema, delete_client_request))
 
@@ -136,6 +152,13 @@ def reactivate_client(request: Request, user_id: int, client_id: int) -> Respons
                 is_credit=False,
                 value=price,
                 type=TransactionTypeEnum.REACTIVATE_CLIENT
+            )
+
+            ClientUpdates.objects.create(
+                user=client.user,
+                client=client,
+                action=ClientUpdatesEnum.RENEWED,
+                automatically=False
             )
 
             client.is_active = True

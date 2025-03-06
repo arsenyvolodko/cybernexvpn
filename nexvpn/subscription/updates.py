@@ -9,8 +9,8 @@ from cybernexvpn.base_model import BaseModel
 from nexvpn.api_clients.schemas import ConfigSchema
 from nexvpn.api_clients.tg_bot_api_client.schemas import UserSubscriptionUpdates, SubscriptionUpdates
 from nexvpn.api_clients.wg_api_client.schemas import DeleteClientsRequest, DeleteClientRequest
-from nexvpn.enums import TransactionTypeEnum, TransactionStatusEnum
-from nexvpn.models import Client, UserBalance, Transaction, Server
+from nexvpn.enums import TransactionTypeEnum, TransactionStatusEnum, ClientUpdatesEnum
+from nexvpn.models import Client, UserBalance, Transaction, Server, ClientUpdates
 from nexvpn.utils import delete_clients
 
 
@@ -76,7 +76,12 @@ def handle_clients_to_renew(user_id: int, clients_to_renew: list[Client]):
         user_balance.value -= client_price
         user_balance.save()
 
-        # todo: add table
+        ClientUpdates.objects.create(
+            user_id=user_id,
+            client=client,
+            action=ClientUpdatesEnum.RENEWED,
+            automatically=True
+        )
 
         Transaction.objects.create(
             user_id=user_id,
@@ -92,8 +97,7 @@ def handle_clients_to_stop(user_id: int, clients_to_stop: list[Client], due_to_l
         client.auto_renew = False
         client.save()
 
-        # todo: add table
-
+        action = None
         if due_to_lack_of_funds:
             Transaction.objects.create(
                 user_id=user_id,
@@ -102,10 +106,26 @@ def handle_clients_to_stop(user_id: int, clients_to_stop: list[Client], due_to_l
                 type=TransactionTypeEnum.RENEW_SUBSCRIPTION,
                 status=TransactionStatusEnum.FAILED
             )
+            action = ClientUpdatesEnum.SUBSCRIPTION_STOPPED_DUE_TO_LACK_OF_FUNDS
+
+        ClientUpdates.objects.create(
+            user_id=user_id,
+            client=client,
+            action=action or ClientUpdatesEnum.SUBSCRIPTION_STOPPED_DUE_TO_OFFED_AUTO_RENEW,
+            automatically=True
+        )
 
 
 def handle_clients_to_delete(clients_to_delete: list[Client]):
     for client in clients_to_delete:
+
+        ClientUpdates.objects.create(
+            user=client.user,
+            client=None,
+            action=ClientUpdatesEnum.DELETED,
+            automatically=True
+        )
+
         client.delete()
 
 
