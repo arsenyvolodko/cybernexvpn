@@ -23,6 +23,7 @@ pillow = "^11.1.0"
 yookassa = "^3.5.0"
 celery = "^5.4.0"
 django-celery-beat = "^2.7.0"
+gunicorn = "^23.0.0"
 
 
 [build-system]
