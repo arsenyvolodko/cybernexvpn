@@ -33,6 +33,8 @@ DEBUG = env.bool("DEBUG", default=True)
 
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost"])
 
+APPEND_SLASH = False
+
 
 # Application definition
 

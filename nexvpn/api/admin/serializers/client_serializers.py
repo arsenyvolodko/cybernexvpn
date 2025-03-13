@@ -13,10 +13,11 @@ class ClientSerializer(serializers.ModelSerializer):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if self.context['request'].method == 'PATCH':
-            self.fields['server'].read_only = True
-        if self.context['request'].method == 'POST':
-            self.fields.pop('auto_renew')
+        if 'request' in self.context:
+            if self.context['request'].method == 'PATCH':
+                self.fields['server'].read_only = True
+            if self.context['request'].method == 'POST':
+                self.fields.pop('auto_renew')
 
     class Meta:
         model = Client

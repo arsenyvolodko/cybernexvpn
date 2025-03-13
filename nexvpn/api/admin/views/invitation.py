@@ -28,7 +28,7 @@ def apply_invitation(request, *args, **kwargs):
     invitee = get_object_or_404(NexUser, pk=invitee_id)
 
     if UserInvitation.objects.filter(invitee=invitee).exists():
-        return Response({"error_message": "Пользователь уже был приглашен."}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"detail": "Пользователь уже был приглашен."}, status=status.HTTP_400_BAD_REQUEST)
 
     with transaction.atomic():
         UserInvitation.objects.create(

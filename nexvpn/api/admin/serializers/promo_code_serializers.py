@@ -6,3 +6,10 @@ class PromoCodeRequestSerializer(serializers.Serializer):
 
     class Meta:
         fields = ("code",)
+
+
+class PromoCodeResponseSerializer(serializers.Serializer):
+    value = serializers.IntegerField()
+
+    class Meta:
+        fields = ("value",)

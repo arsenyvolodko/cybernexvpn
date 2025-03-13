@@ -9,12 +9,13 @@ from nexvpn.api.admin.views.payment import get_transactions_history, create_paym
 from nexvpn.api.admin.views.user import UsersViewSet
 
 urlpatterns = [
+    path("users/", UsersViewSet.as_view({'get': 'list'})),
     path("users/<int:user_id>/", UsersViewSet.as_view({'get': 'retrieve', 'post': 'create'})),
 
     path("users/<int:user_id>/payments/", create_payment),
     path("users/<int:user_id>/payments/history/", get_transactions_history),
-    path("users/<int:user_id>/apply-invitatation/", apply_invitation),
-    path("users/<int:user_id>/apply-promoode/", apply_promo_code),
+    path("users/<int:user_id>/apply-invitation/", apply_invitation),
+    path("users/<int:user_id>/apply-promo-code/", apply_promo_code),
 
     path("users/<int:user_id>/clients/", ClientsViewSet.as_view({'get': 'list', 'post': 'create'})),
     path("users/<int:user_id>/clients/<int:client_id>/", ClientsViewSet.as_view({'get': 'retrieve', 'patch': 'partial_update', 'delete': 'destroy'})),

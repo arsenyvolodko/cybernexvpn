@@ -4,12 +4,12 @@ from drf_spectacular.utils import extend_schema
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from nexvpn.api.admin.serializers.promo_code_serializers import PromoCodeRequestSerializer
+from nexvpn.api.admin.serializers.promo_code_serializers import PromoCodeRequestSerializer, PromoCodeResponseSerializer
 from nexvpn.enums import TransactionTypeEnum
 from nexvpn.models import NexUser, PromoCode, UsedPromoCode, UserBalance, Transaction
 
 
-@extend_schema(tags=["users"], request=PromoCodeRequestSerializer)
+@extend_schema(tags=["users"], request=PromoCodeRequestSerializer, responses=PromoCodeResponseSerializer)
 @api_view(["POST"])
 def apply_promo_code(request, user_id: int):
     user = get_object_or_404(NexUser, pk=user_id)
@@ -49,4 +49,7 @@ def apply_promo_code(request, user_id: int):
             type=TransactionTypeEnum.PROMO_CODE,
         )
 
-    return Response()
+    response_serializer = PromoCodeResponseSerializer(data={"value": code.value})
+    response_serializer.is_valid(raise_exception=True)
+    return Response(response_serializer.validated_data)
+

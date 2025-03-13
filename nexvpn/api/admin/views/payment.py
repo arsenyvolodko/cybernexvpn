@@ -76,9 +76,9 @@ def get_transactions_history(request, user_id: int) -> FileResponse:
     user = get_object_or_404(NexUser, pk=user_id)
     res = f"Данные актуальны на момент {now().strftime("%d.%m.%Y %H:%M:%S")}.\n\n"
     res += f"Текущий баланс: {user.balance}₽\n\n"
-    res += "История транзакций:\n"
+    res += "История транзакций:\n\n"
     transactions = Transaction.objects.filter(user_id=user_id).order_by("-created_at")
-    res += "\n".join(map(str, transactions))
+    res += "\n\n".join(map(str, transactions))
 
     with tempfile.NamedTemporaryFile(mode="w+", delete=True) as temp_file:
         temp_file.write(res)

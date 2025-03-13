@@ -62,6 +62,9 @@ class Server(models.Model):
     is_active = models.BooleanField(default=True)
     config = models.OneToOneField(ServerConfig, on_delete=models.CASCADE)
 
+    def __str__(self):
+        return self.name
+
 
 class BaseClient(models.Model):
     user = models.ForeignKey(NexUser, on_delete=models.CASCADE)

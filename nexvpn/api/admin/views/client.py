@@ -124,7 +124,7 @@ class ClientsViewSet(ModelViewSet):
         return Response(data, status=status.HTTP_400_BAD_REQUEST)
 
 
-@extend_schema(tags=["client"])
+@extend_schema(tags=["client"], responses={200: ClientSerializer})
 @api_view(["POST"])
 def reactivate_client(request: Request, user_id: int, client_id: int) -> Response:  # noqa
     client = get_object_or_404(Client, pk=client_id, user_id=user_id)
@@ -170,7 +170,7 @@ def reactivate_client(request: Request, user_id: int, client_id: int) -> Respons
             create_client_request = CreateClientRequest(ip=client.endpoint.ip, public_key=client.public_key)
             asyncio.run(add_client(config_schema, create_client_request))
 
-        return Response(status=status.HTTP_200_OK)
+        return Response(status=status.HTTP_200_OK, data=ClientSerializer(client).data)
 
     except BaseClientError as e:
         logging.info(f"Cannot reactivate client: {e.message}")
