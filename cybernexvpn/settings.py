@@ -35,7 +35,6 @@ ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost"])
 
 APPEND_SLASH = False
 
-
 # Application definition
 
 INSTALLED_APPS = [
@@ -63,13 +62,12 @@ MIDDLEWARE = [
 
 # DRF
 REST_FRAMEWORK = {
-    # "DEFAULT_AUTHENTICATION_CLASSES": (
-    #     "rest_framework_simplejwt.authentication.JWTAuthentication",
-    # ),
-    # "DEFAULT_FILTER_BACKENDS": "django_filters.rest_framework.DjangoFilterBackend",
+    # 'DEFAULT_AUTHENTICATION_CLASSES': [
+    #     'nexvpn.authentication.APIKeyAuthentication',
+    # ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
-}
 
+}
 
 #Swagger
 SPECTACULAR_SETTINGS = {
@@ -80,7 +78,6 @@ SPECTACULAR_SETTINGS = {
     'COMPONENT_SPLIT_REQUEST': True,
     'ENABLE_FILE_UPLOADS': True,
 }
-
 
 ROOT_URLCONF = "cybernexvpn.urls"
 
@@ -126,7 +123,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
 
@@ -137,7 +133,6 @@ TIME_ZONE = "UTC"
 USE_I18N = True
 
 USE_TZ = True
-
 
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
@@ -154,6 +149,8 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 YOOKASSA_OAUTH_TOKEN = env.str("YOOKASSA_OAUTH_TOKEN")
 Configuration.configure_auth_token(YOOKASSA_OAUTH_TOKEN)
+
+ADMIN_API_KEY = env.str("ADMIN_API_KEY")
 
 TG_BOT_URL = env.str("TG_BOT_URL")
 TG_BOT_API_URL = env.str("TG_BOT_API_URL")
