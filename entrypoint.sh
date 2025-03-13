@@ -7,4 +7,4 @@ mkdir -p ./data/postgres
 python3 manage.py migrate
 python3 manage.py collectstatic --noinput
 
-gunicorn nexvpn.wsgi:application --bind 0.0.0.0:8000
+gunicorn cybernexvpn.wsgi:application --bind 0.0.0.0:8000
