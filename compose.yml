@@ -51,12 +51,24 @@ services:
     build: ./nginx
     ports:
       - "80:80"
+      - "443:443"
     environment:
       - DOMAIN_NAME=${DOMAIN_NAME}
     depends_on:
       - wsgi
+      - certbot
     volumes:
       - ./data/backend/static/:/app/data/backend/static/
+      - ./data/certificates:/etc/letsencrypt
+      - ./data/nginx:/var/www/certbot
+
+  certbot:
+    image: certbot/certbot
+    container_name: certbot
+    volumes:
+      - ./data/certificates:/etc/letsencrypt
+      - ./data/nginx:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
 
 volumes:
   redis_data:
