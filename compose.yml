@@ -60,8 +60,8 @@ services:
       - wsgi
     volumes:
       - ./data/backend/static/:/app/data/backend/static/
-      - ./data/certificates:/etc/letsencrypt
-      - ./data/nginx:/var/www/certbot
+      - /etc/letsencrypt:/etc/letsencrypt
+      - /var/www/certbot:/var/www/certbot
 
 volumes:
   redis_data:
