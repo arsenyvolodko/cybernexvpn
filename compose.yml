@@ -58,7 +58,6 @@ services:
       - DOMAIN_NAME=${DOMAIN_NAME}
     depends_on:
       - wsgi
-      - certbot
     volumes:
       - ./data/backend/static/:/app/data/backend/static/
       - ./data/certificates:/etc/letsencrypt
