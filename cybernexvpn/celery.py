@@ -12,7 +12,7 @@ app.autodiscover_tasks()
 app.conf.beat_schedule = {
     'send-subscription-reminders': {
         'task': 'nexvpn.tasks.send_updates',
-        'schedule': crontab(hour="10", minute="00"),
+        'schedule': crontab(hour="15", minute="52"),
         'args': (now(), True),
     },
     'make-subscription-updates': {

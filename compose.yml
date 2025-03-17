@@ -20,7 +20,20 @@ services:
     volumes:
       - redis_data:/data
 
-  celery_beat:
+  celery-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    command: celery -A cybernexvpn.celery.app worker --loglevel=info
+    depends_on:
+      - redis
+    restart: on-failure
+    volumes:
+      - ./data/backend/static/:/app/data/backend/static/
+
+  celery-beat:
     build:
       context: .
       dockerfile: Dockerfile

@@ -24,8 +24,19 @@ yookassa = "^3.5.0"
 celery = "^5.4.0"
 django-celery-beat = "^2.7.0"
 gunicorn = "^23.0.0"
+redis = "^5.2.1"
+faker = "^37.0.0"
+pytest = "^8.3.5"
+pytest-django = "^4.10.0"
+factory-boy = "^3.3.3"
+pytest-mock = "^3.14.0"
 
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py", "tests.py"]
+DJANGO_SETTINGS_MODULE = "cybernexvpn.settings"
+addopts = "--reuse-db --create-db"

@@ -22,6 +22,7 @@ class ClientsSchema(BaseModel):
 
 
 def get_response_schema(user_id: int, clients_schema: ClientsSchema) -> UserSubscriptionUpdates:
+
     return UserSubscriptionUpdates(
         user=user_id,
         renewed=[client.name for client in clients_schema.clients_to_renew],
@@ -49,6 +50,7 @@ def get_clients_by_groups(user_id: int, date_time: datetime) -> ClientsSchema:
     clients_to_delete_list = list(
         user_clients.filter(is_active=False, end_date__lte=(date_time - relativedelta(months=2)).date()))
     clients_to_renew_list, extra_clients_to_stop = update_clients_to_renew(user_id, clients_to_renew_list)
+
     return ClientsSchema(
         clients_to_renew=clients_to_renew_list, extra_clients_to_stop=extra_clients_to_stop,
         clients_to_stop=clients_to_stop_list, clients_to_delete=clients_to_delete_list
@@ -101,7 +103,7 @@ def handle_clients_to_stop(user_id: int, clients_to_stop: list[Client], due_to_l
         if due_to_lack_of_funds:
             Transaction.objects.create(
                 user_id=user_id,
-                is_credit=True,
+                is_credit=False,
                 value=client.server.price,
                 type=TransactionTypeEnum.RENEW_SUBSCRIPTION,
                 status=TransactionStatusEnum.FAILED
@@ -160,7 +162,6 @@ def get_updates_schema(date_time: datetime, is_reminder: bool) -> SubscriptionUp
     users_with_clients_to_update = get_users_with_clients_to_update(date_time)
 
     for user_id in users_with_clients_to_update:
-        # todo: add transaction and handle user balance correctly
         client_schema: ClientsSchema = get_clients_by_groups(user_id, date_time)
 
         if not is_reminder:

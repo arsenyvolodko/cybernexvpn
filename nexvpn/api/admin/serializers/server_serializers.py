@@ -7,4 +7,4 @@ class ServerSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Server
-        fields = ["id", "name", "price", ]
+        fields = ["id", "name", "price", "tag", ]
