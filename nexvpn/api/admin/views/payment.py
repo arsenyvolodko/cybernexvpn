@@ -9,10 +9,11 @@ from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils.timezone import now
 from drf_spectacular.utils import extend_schema
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from yookassa.domain.response import PaymentResponse
 
+from nexvpn import permissions
 from nexvpn.api.admin.serializers.payment_serializers import PaymentRequestSerializers, PaymentResponseSerializer
 from nexvpn.utils import gen_yookassa_payment_data
 from nexvpn.enums import TransactionTypeEnum, TransactionStatusEnum
@@ -21,6 +22,7 @@ from nexvpn.models import Transaction, NexUser, Payment
 
 @extend_schema(request=PaymentRequestSerializers, responses={201: PaymentResponseSerializer}, tags=["payments"])
 @api_view(["POST"])
+@permission_classes([permissions.IsAdmin])
 def create_payment(request, user_id: int) -> Response:
     user = get_object_or_404(NexUser, pk=user_id)
     serializer = PaymentRequestSerializers(data=request.data)
@@ -72,6 +74,7 @@ def create_payment(request, user_id: int) -> Response:
 
 @extend_schema(tags=["payments"])
 @api_view(["GET"])
+@permission_classes([permissions.IsAdmin])
 def get_transactions_history(request, user_id: int) -> FileResponse:
     user = get_object_or_404(NexUser, pk=user_id)
     res = f"Данные актуальны на момент {now().strftime("%d.%m.%Y %H:%M:%S")}.\n\n"

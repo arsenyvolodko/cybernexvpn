@@ -2,5 +2,6 @@
 __pycache__/
 .env
 .env.stage
+.env.prod
 /data/
 celerybeat-schedule.db

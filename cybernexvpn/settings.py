@@ -63,14 +63,10 @@ MIDDLEWARE = [
 
 # DRF
 REST_FRAMEWORK = {
-    # 'DEFAULT_AUTHENTICATION_CLASSES': [
-    #     'nexvpn.authentication.APIKeyAuthentication',
-    # ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
-
 }
 
-#Swagger
+# Swagger
 SPECTACULAR_SETTINGS = {
     'TITLE': 'NEX API Documentation',
     'VERSION': '1.0.0',
@@ -78,6 +74,18 @@ SPECTACULAR_SETTINGS = {
     'CAMELIZE_NAMES': True,
     'COMPONENT_SPLIT_REQUEST': True,
     'ENABLE_FILE_UPLOADS': True,
+
+    "AUTHENTICATION_WHITELIST": [],
+    "APPEND_COMPONENTS": {
+        "securitySchemes": {
+            "ApiKeyAuth": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "X-API-KEY",
+            }
+        }
+    },
+    "SECURITY": [{"ApiKeyAuth": []}],
 }
 
 ROOT_URLCONF = "cybernexvpn.urls"
@@ -100,11 +108,9 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "cybernexvpn.wsgi.application"
 
-
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 DATABASES = {"default": dj_database_url.config(default=env.str("DATABASE_URL"))}
-
 
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators

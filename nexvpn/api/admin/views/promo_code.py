@@ -1,9 +1,10 @@
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
+from nexvpn import permissions
 from nexvpn.api.admin.serializers.promo_code_serializers import PromoCodeRequestSerializer, PromoCodeResponseSerializer
 from nexvpn.enums import TransactionTypeEnum
 from nexvpn.models import NexUser, PromoCode, UsedPromoCode, UserBalance, Transaction
@@ -11,6 +12,7 @@ from nexvpn.models import NexUser, PromoCode, UsedPromoCode, UserBalance, Transa
 
 @extend_schema(tags=["users"], request=PromoCodeRequestSerializer, responses=PromoCodeResponseSerializer)
 @api_view(["POST"])
+@permission_classes([permissions.IsAdmin])
 def apply_promo_code(request, user_id: int):
     user = get_object_or_404(NexUser, pk=user_id)
 

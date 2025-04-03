@@ -3,9 +3,10 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
+from nexvpn import permissions
 from nexvpn.api.admin.serializers.invitation_serializers import InvitationRequestSerializer
 from nexvpn.enums import TransactionTypeEnum
 from nexvpn.models import NexUser, UserInvitation, UserBalance, Transaction
@@ -13,6 +14,7 @@ from nexvpn.models import NexUser, UserInvitation, UserBalance, Transaction
 
 @extend_schema(tags=["users"], request=InvitationRequestSerializer)
 @api_view(["POST"])
+@permission_classes([permissions.IsAdmin])
 def apply_invitation(request, *args, **kwargs):
 
     invitee_id = kwargs.get("user_id")
