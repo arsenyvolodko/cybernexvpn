@@ -32,7 +32,7 @@ def handle_notification(request: Request) -> Response:
     payment_obj = webhook.object
 
     payment = Payment.objects.filter(id=payment_obj.id).first()
-    payment_transaction = Transaction.objects.filter(payment__isnull=False, payment=payment).first()
+    payment_transaction: Transaction = Transaction.objects.filter(payment__isnull=False, payment=payment).first()
 
     if not (payment and payment_transaction):
         logging.info(f"Cannot process webhook: payment or transaction not found:\n"
@@ -56,5 +56,5 @@ def handle_notification(request: Request) -> Response:
         user_balance.value += payment_transaction.value
         user_balance.save()
 
-        asyncio.run(succeed_payment(payment_id=payment.uuid))
+        asyncio.run(succeed_payment(payment_id=str(payment.uuid), user_id=payment_transaction.user.id))
         return Response(status=200)

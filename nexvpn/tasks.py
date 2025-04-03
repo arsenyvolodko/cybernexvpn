@@ -19,9 +19,8 @@ async def _send_updates_util(updates: SubscriptionUpdates):
         url=settings.TG_BOT_API_URL,
         api_key=settings.TG_BOT_API_KEY
     )
-    logger.info("HERE")
-    # async with TgBotAPIClient(config_schema) as api_client:
-    #     await api_client.make_subscription_updates(updates)
+    async with TgBotAPIClient(config_schema) as api_client:
+        await api_client.make_subscription_updates(updates)
 
 
 @shared_task()

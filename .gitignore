@@ -1,5 +1,6 @@
 .idea/
 __pycache__/
 .env
+.env.stage
 /data/
 celerybeat-schedule.db

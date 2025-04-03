@@ -38,10 +38,10 @@ async def delete_clients(config_schema: ConfigSchema, delete_clients_request: De
     await _handle_clients_util(config_schema, delete_clients_request, WgAPIClient.delete_clients)
 
 
-async def succeed_payment(payment_id: uuid):
+async def succeed_payment(payment_id: str, user_id: int):
     config_schema = ConfigSchema(url=settings.TG_BOT_API_URL, api_key=settings.TG_BOT_API_KEY)
     async with TgBotAPIClient(config_schema) as api_client:
-        await api_client.succeed_payment(payment_id)
+        await api_client.succeed_payment(payment_id, user_id)
 
 
 def gen_client_config_data(client: Client) -> str:
