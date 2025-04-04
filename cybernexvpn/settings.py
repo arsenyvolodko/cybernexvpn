@@ -31,7 +31,10 @@ SECRET_KEY = env.str("DJANGO_SECRET_KEY")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env.bool("DEBUG", default=True)
 
+BASE_URL = env.str("BASE_URL", default="http://localhost:8000")
+
 ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost"])
+CSRF_TRUSTED_ORIGINS = [BASE_URL, ]
 
 APPEND_SLASH = False
 
