@@ -24,7 +24,7 @@ def handle_notification(request: Request) -> Response:
         logging.error(f"Error parsing webhook: {e}")
         return Response(status=400)
 
-    if not (webhook.type == EXPECTED_WEBHOOK_TYPE and webhook.event in PaymentStatusEnum.values()):
+    if not (webhook.type == EXPECTED_WEBHOOK_TYPE and webhook.event in PaymentStatusEnum.values):
         # Return 200 to YooKassa to avoid repeated requests
         return Response(status=200)
 
