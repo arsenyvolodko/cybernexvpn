@@ -21,10 +21,11 @@ class ClientsSchema(BaseModel):
     clients_to_delete: list[Client]
 
 
-def get_response_schema(user_id: int, clients_schema: ClientsSchema) -> UserSubscriptionUpdates:
+def get_response_schema(user_id: int, total_price: int, clients_schema: ClientsSchema) -> UserSubscriptionUpdates:
 
     return UserSubscriptionUpdates(
         user=user_id,
+        total_price=total_price,
         renewed=[client.name for client in clients_schema.clients_to_renew],
         stopped_due_to_lack_of_funds=[client.name for client in clients_schema.extra_clients_to_stop],
         stopped_due_to_offed_auto_renew=[client.name for client in clients_schema.clients_to_stop],
@@ -67,7 +68,8 @@ def get_users_with_clients_to_update(date_time: datetime) -> list[int]:
     return list(users_with_clients_to_update)
 
 
-def handle_clients_to_renew(user_id: int, clients_to_renew: list[Client]):
+def handle_clients_to_renew(user_id: int, clients_to_renew: list[Client]) -> int:
+    total_price = 0
     for client in clients_to_renew:
         client.end_date = (now() + relativedelta(months=1)).date()
         client.save()
@@ -76,6 +78,7 @@ def handle_clients_to_renew(user_id: int, clients_to_renew: list[Client]):
 
         user_balance = UserBalance.objects.get(user_id=user_id)
         user_balance.value -= client_price
+        total_price += client_price
         user_balance.save()
 
         ClientUpdates.objects.create(
@@ -91,6 +94,8 @@ def handle_clients_to_renew(user_id: int, clients_to_renew: list[Client]):
             value=client_price,
             type=TransactionTypeEnum.RENEW_SUBSCRIPTION,
         )
+
+    return total_price
 
 
 def handle_clients_to_stop(user_id: int, clients_to_stop: list[Client], due_to_lack_of_funds: bool):
@@ -147,12 +152,12 @@ def delete_clients_from_server(client_to_delete: list[Client]):
         asyncio.run(delete_clients(config_schema, delete_clients_request))
 
 
-def handle_clients(user_id: int, client_schema: ClientsSchema) -> list[Client]:
-    handle_clients_to_renew(user_id, client_schema.clients_to_renew)
+def handle_clients(user_id: int, client_schema: ClientsSchema) -> tuple[int, list[Client]]:
+    total_price = handle_clients_to_renew(user_id, client_schema.clients_to_renew)
     handle_clients_to_stop(user_id, client_schema.extra_clients_to_stop, due_to_lack_of_funds=True)
     handle_clients_to_stop(user_id, client_schema.clients_to_stop, due_to_lack_of_funds=False)
     handle_clients_to_delete(client_schema.clients_to_delete)
-    return client_schema.clients_to_stop + client_schema.extra_clients_to_stop + client_schema.clients_to_delete
+    return total_price, client_schema.clients_to_stop + client_schema.extra_clients_to_stop + client_schema.clients_to_delete
 
 
 def get_updates_schema(date_time: datetime, is_reminder: bool) -> SubscriptionUpdates:
@@ -163,11 +168,13 @@ def get_updates_schema(date_time: datetime, is_reminder: bool) -> SubscriptionUp
 
     for user_id in users_with_clients_to_update:
         client_schema: ClientsSchema = get_clients_by_groups(user_id, date_time)
+        total_price = 0
 
         if not is_reminder:
-            clients_to_delete.extend(handle_clients(user_id, client_schema))
+            total_price, extra_clients_to_delete = handle_clients(user_id, client_schema)
+            clients_to_delete.extend(extra_clients_to_delete)
 
-        user_updates: UserSubscriptionUpdates = get_response_schema(user_id, client_schema)
+        user_updates: UserSubscriptionUpdates = get_response_schema(user_id, total_price, client_schema)
         users_subscriptions_updates.append(user_updates)
 
     if clients_to_delete:

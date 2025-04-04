@@ -111,6 +111,7 @@ def test_subscription_updates():
         updates=[
             UserSubscriptionUpdates(
                 user=user1.id,
+                total_price=200,
                 renewed=[client1_3.name, client1_4.name, client1_5.name],
                 stopped_due_to_lack_of_funds=[client1_6.name],
                 stopped_due_to_offed_auto_renew=[client1_7.name],
@@ -118,6 +119,7 @@ def test_subscription_updates():
             ),
             UserSubscriptionUpdates(
                 user=user2.id,
+                total_price=100,
                 renewed=[client2_1.name, client2_2.name],
                 stopped_due_to_lack_of_funds=[],
                 stopped_due_to_offed_auto_renew=[],
