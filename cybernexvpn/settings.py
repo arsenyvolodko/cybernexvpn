@@ -33,7 +33,20 @@ DEBUG = env.bool("DEBUG", default=True)
 
 BASE_URL = env.str("BASE_URL", default="http://localhost:8000")
 
-ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost"])
+ALLOWED_HOSTS = [
+    "cybernexvpn.ru",
+    "77.238.236.90",
+
+    # yookassa
+    "185.71.76.0",
+    "185.71.77.0",
+    "77.75.153.0/25",
+    "77.75.156.11",
+    "77.75.156.35",
+    "77.75.154.128",
+    "2a02:5180::/32"
+]
+
 CSRF_TRUSTED_ORIGINS = [BASE_URL, ]
 
 APPEND_SLASH = False
