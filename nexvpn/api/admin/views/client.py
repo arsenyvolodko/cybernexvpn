@@ -38,7 +38,7 @@ class ClientsViewSet(ModelViewSet):
         user_id = self.kwargs.get("user_id")
         if client_id := self.kwargs.get("client_id"):
             queryset = queryset.filter(pk=client_id)
-        return queryset.filter(user_id=user_id)
+        return queryset.filter(user_id=user_id).order_by("num")
 
     def perform_create(self, serializer: ClientSerializer, *args, **kwargs) -> None:
         user_id = self.kwargs.get("user_id")
