@@ -1,6 +1,7 @@
 import os
 from celery import Celery
 from celery.schedules import crontab
+from dateutil.relativedelta import relativedelta
 from django.utils.timezone import now
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'cybernexvpn.settings')
@@ -13,7 +14,7 @@ app.conf.beat_schedule = {
     'send-subscription-reminders': {
         'task': 'nexvpn.tasks.send_updates',
         'schedule': crontab(hour="10", minute="00"),
-        'args': (now(), True),
+        'args': (now() + relativedelta(days=1), True),
     },
     'make-subscription-updates': {
         'task': 'nexvpn.tasks.send_updates',
