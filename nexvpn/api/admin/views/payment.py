@@ -29,34 +29,20 @@ def create_payment(request, user_id: int) -> Response:
     serializer.is_valid(raise_exception=True)
 
     value = serializer.validated_data["value"]
-
-    old_transaction = Transaction.objects.filter(
-        user=user,
-        value=value,
-        status=TransactionStatusEnum.WAITING_FOR_CAPTURE,
-        created_at__gt=now() - timedelta(minutes=10),
-        payment__isnull=False
-    ).first()
-    existing_payment = old_transaction.payment if old_transaction else None
     payment_data = gen_yookassa_payment_data(value)
     try:
         with transaction.atomic():
-
-            if existing_payment:
-                idempotence_key = existing_payment.idempotence_key
-                yookassa_payment: PaymentResponse = yookassa.Payment.create(payment_data, idempotence_key)
-            else:
-                idempotence_key = uuid.uuid4()
-                yookassa_payment: PaymentResponse = yookassa.Payment.create(payment_data, idempotence_key)
-                payment = Payment.objects.create(uuid=yookassa_payment.id, idempotence_key=idempotence_key)
-                Transaction.objects.create(
-                    user=user,
-                    is_credit=True,
-                    value=value,
-                    payment=payment,
-                    type=TransactionTypeEnum.FILL_UP_BALANCE,
-                    status=TransactionStatusEnum.WAITING_FOR_CAPTURE
-                )
+            idempotence_key = uuid.uuid4()
+            yookassa_payment: PaymentResponse = yookassa.Payment.create(payment_data, idempotence_key)
+            payment = Payment.objects.create(uuid=yookassa_payment.id, idempotence_key=idempotence_key)
+            Transaction.objects.create(
+                user=user,
+                is_credit=True,
+                value=value,
+                payment=payment,
+                type=TransactionTypeEnum.FILL_UP_BALANCE,
+                status=TransactionStatusEnum.WAITING_FOR_CAPTURE
+            )
             if yookassa_payment.status != 'pending':
                 raise Exception(f"Payment status is not pending")
             url = yookassa_payment.confirmation.confirmation_url
