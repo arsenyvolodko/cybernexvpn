@@ -7,6 +7,6 @@ from .notifications.views import handle_notification
 
 urlpatterns = [
     path("admin/", include(admin_urls)),
-    path("api/v1/payment_succeeded/", handle_notification),
+    path("payment_succeeded/", handle_notification),
     path("yookassa/", include(yookassa_urls)),
 ]
