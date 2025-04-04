@@ -31,7 +31,7 @@ def handle_notification(request: Request) -> Response:
     new_status = PaymentStatusEnum(value=webhook.event)
     payment_obj = webhook.object
 
-    payment = Payment.objects.filter(id=payment_obj.id).first()
+    payment = Payment.objects.filter(uuid=payment_obj.id).first()
     payment_transaction: Transaction = Transaction.objects.filter(payment__isnull=False, payment=payment).first()
 
     if not (payment and payment_transaction):
