@@ -11,15 +11,18 @@ app = Celery('cybernexvpn')
 app.config_from_object('django.conf:settings', namespace='CELERY')
 app.autodiscover_tasks()
 
+reminder_time = settings.SEND_UPDATES_REMINDER_TIME.split(":")
+updates_time = settings.SEND_UPDATES_TIME.split(":")
+
 app.conf.beat_schedule = {
     'send-subscription-reminders': {
         'task': 'nexvpn.tasks.send_updates',
-        'schedule': crontab(hour=settings.SEND_UPDATES_REMINDER_HOUR, minute="00"),
+        'schedule': crontab(hour=reminder_time[0], minute=reminder_time[1]),
         'args': [(now() + relativedelta(days=1)).isoformat(), True],
     },
     'make-subscription-updates': {
         'task': 'nexvpn.tasks.send_updates',
-        'schedule': crontab(hour=settings.SEND_UPDATES_HOUR, minute="00"),
+        'schedule': crontab(hour=updates_time[0], minute=updates_time[1]),
         'args': [now().isoformat(), False],
     },
 }
