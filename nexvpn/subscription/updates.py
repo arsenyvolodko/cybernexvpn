@@ -58,10 +58,16 @@ def get_clients_by_groups(user_id: int, date_time: datetime) -> ClientsSchema:
     )
 
 
-def get_users_with_clients_to_update(date_time: datetime) -> list[int]:
+def get_users_with_clients_to_update(date_time: datetime, is_reminder: bool) -> list[int]:
+    filter_name = "end_date" if is_reminder else "end_date__lte"
+    filters = {
+        "is_active": True,
+        filter_name: date_time.date(),
+    }
+
     users_with_clients_to_update = (
         Client.objects
-        .filter(is_active=True, end_date=date_time.date())
+        .filter(**filters)
         .values_list("user", flat=True)
         .distinct()
     )
@@ -164,7 +170,7 @@ def get_updates_schema(date_time: datetime, is_reminder: bool) -> SubscriptionUp
     users_subscriptions_updates: list[UserSubscriptionUpdates] = list()
 
     clients_to_delete = []
-    users_with_clients_to_update = get_users_with_clients_to_update(date_time)
+    users_with_clients_to_update = get_users_with_clients_to_update(date_time, is_reminder)
 
     for user_id in users_with_clients_to_update:
         client_schema: ClientsSchema = get_clients_by_groups(user_id, date_time)

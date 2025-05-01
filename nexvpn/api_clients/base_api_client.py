@@ -1,8 +1,11 @@
+import logging
 from abc import ABC
 
 import aiohttp
 
 from nexvpn.api_clients import schemas
+
+logger = logging.getLogger(__name__)
 
 
 class BaseAPIClient(ABC):
@@ -25,5 +28,7 @@ class BaseAPIClient(ABC):
         request.headers["x-api-key"] = f"{self._token}"
 
         kwargs = {**request.model_dump(by_alias=True), "url": str(request.url)}
+        logger.info(f"Making request: {kwargs}")
         async with self._session.request(**kwargs, timeout=self._timeout) as response:
+            logger.info(f"Response status: {response.status}")
             response.raise_for_status()

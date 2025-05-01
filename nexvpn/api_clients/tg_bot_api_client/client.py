@@ -14,5 +14,7 @@ class TgBotAPIClient(BaseAPIClient):
         await self._make_request(request)
 
     async def make_subscription_updates(self, updates: SubscriptionUpdates):
+        logger.info(f"Making request with subscription updates: {updates}")
         request = schemas.Request(url=f"{self._base_url}/make-subscription-updates/", json=updates.model_dump(by_alias=True))
+        logger.info(f"Request data: {request}")
         await self._make_request(request)

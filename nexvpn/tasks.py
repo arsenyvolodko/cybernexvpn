@@ -24,6 +24,9 @@ async def _send_updates_util(updates: SubscriptionUpdates):
 
 
 @shared_task()
-def send_updates(date_time: datetime, is_reminder: bool):
+def send_updates(date_time: str, is_reminder: bool):
+    date_time = datetime.fromisoformat(date_time)
+    logger.info(f"Starting updates task. Get date_time: {date_time}, is_reminder: {is_reminder}")
     updates_schema = get_updates_schema(date_time, is_reminder)
+    logger.info(f"Sending subscription updates task: {updates_schema}")
     asyncio.run(_send_updates_util(updates_schema))

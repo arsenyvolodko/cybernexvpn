@@ -35,6 +35,7 @@ BASE_URL = env.str("BASE_URL", default="http://localhost:8000")
 
 ALLOWED_HOSTS = [
     "cybernexvpn.ru",
+    "localhost",
     "77.238.236.90",
 
     # yookassa
@@ -187,3 +188,6 @@ TG_BOT_API_KEY = env.str("TG_BOT_API_KEY")
 START_BALANCE = env.int("START_PRICE", 100)
 DEFAULT_SUBSCRIPTION_PRICE = env.int("DEFAULT_SUBSCRIPTION_PRICE", 100)
 INVITATION_BONUS = env.int("INVITATION_BONUS", 50)
+
+SEND_UPDATES_REMINDER_HOUR = env.str("SEND_UPDATES_REMINDER_HOUR", "10")
+SEND_UPDATES_HOUR = env.str("SEND_UPDATES_REMINDER_HOUR", "03")

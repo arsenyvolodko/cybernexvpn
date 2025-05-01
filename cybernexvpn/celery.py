@@ -2,6 +2,7 @@ import os
 from celery import Celery
 from celery.schedules import crontab
 from dateutil.relativedelta import relativedelta
+from django.conf import settings
 from django.utils.timezone import now
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'cybernexvpn.settings')
@@ -13,12 +14,12 @@ app.autodiscover_tasks()
 app.conf.beat_schedule = {
     'send-subscription-reminders': {
         'task': 'nexvpn.tasks.send_updates',
-        'schedule': crontab(hour="10", minute="00"),
-        'args': (now() + relativedelta(days=1), True),
+        'schedule': crontab(hour=settings.SEND_UPDATES_REMINDER_HOUR, minute="00"),
+        'args': [(now() + relativedelta(days=1)).isoformat(), True],
     },
     'make-subscription-updates': {
         'task': 'nexvpn.tasks.send_updates',
-        'schedule': crontab(hour="03", minute="00"),
-        'args': (now(), False),
+        'schedule': crontab(hour=settings.SEND_UPDATES_HOUR, minute="00"),
+        'args': [now().isoformat(), False],
     },
 }
