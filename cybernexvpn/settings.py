@@ -34,6 +34,7 @@ DEBUG = env.bool("DEBUG", default=True)
 BASE_URL = env.str("BASE_URL", default="http://localhost:8000")
 
 ALLOWED_HOSTS = [
+    "www.cybernexvpn.ru",
     "cybernexvpn.ru",
     "localhost",
     "77.238.236.90",
