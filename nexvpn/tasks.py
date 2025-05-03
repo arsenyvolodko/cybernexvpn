@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from celery import shared_task
 from django.conf import settings
@@ -24,9 +24,8 @@ async def _send_updates_util(updates: SubscriptionUpdates):
 
 
 @shared_task()
-def send_updates(date_time: str, is_reminder: bool):
-    date_time = datetime.fromisoformat(date_time)
-    logger.info(f"Starting updates task. Get date_time: {date_time}, is_reminder: {is_reminder}")
-    updates_schema = get_updates_schema(date_time, is_reminder)
+def send_updates(today: bool, is_reminder: bool):
+    logger.info(f"Starting subscription task: today: {today}, is_reminder: {is_reminder}")
+    updates_schema = get_updates_schema(today, is_reminder)
     logger.info(f"Sending subscription updates task: {updates_schema}")
     asyncio.run(_send_updates_util(updates_schema))

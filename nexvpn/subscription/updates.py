@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import logging
 from collections import defaultdict
 
 from dateutil.relativedelta import relativedelta
@@ -12,6 +13,8 @@ from nexvpn.api_clients.wg_api_client.schemas import DeleteClientsRequest, Delet
 from nexvpn.enums import TransactionTypeEnum, TransactionStatusEnum, ClientUpdatesEnum
 from nexvpn.models import Client, UserBalance, Transaction, Server, ClientUpdates
 from nexvpn.utils import delete_clients
+
+logger = logging.getLogger(__name__)
 
 
 class ClientsSchema(BaseModel):
@@ -172,6 +175,7 @@ def get_date_time(today: bool):
 
 def get_updates_schema(today: bool, is_reminder: bool) -> SubscriptionUpdates:
     date_time = get_date_time(today)
+    logger.info(f"Starting getting updates. date_time: {date_time}, is_reminder: {is_reminder}")
 
     users_subscriptions_updates: list[UserSubscriptionUpdates] = list()
 
