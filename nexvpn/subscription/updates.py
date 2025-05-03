@@ -166,7 +166,13 @@ def handle_clients(user_id: int, client_schema: ClientsSchema) -> tuple[int, lis
     return total_price, client_schema.clients_to_stop + client_schema.extra_clients_to_stop + client_schema.clients_to_delete
 
 
-def get_updates_schema(date_time: datetime, is_reminder: bool) -> SubscriptionUpdates:
+def get_date_time(today: bool):
+    return now() if today else (now() + relativedelta(days=1))
+
+
+def get_updates_schema(today: bool, is_reminder: bool) -> SubscriptionUpdates:
+    date_time = get_date_time(today)
+
     users_subscriptions_updates: list[UserSubscriptionUpdates] = list()
 
     clients_to_delete = []
