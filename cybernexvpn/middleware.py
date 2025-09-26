@@ -20,7 +20,7 @@ class YookassaCallbackMiddleware:
         return request.META.get("REMOTE_ADDR")
 
     def __call__(self, request):
-        if request.path.endswith("yookassa/notifications/"):
+        if "yookassa" in request.path:
             client_ip = self.get_client_ip(request)
             logger.info(f"client_ip: {client_ip}")
 
