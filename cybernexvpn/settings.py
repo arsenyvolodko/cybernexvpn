@@ -73,11 +73,11 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "cybernexvpn.middleware.YookassaCallbackMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "cybernexvpn.middleware.YookassaCallbackMiddleware",
 ]
 
 # DRF
@@ -91,21 +91,26 @@ LOGGING = {
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
+            "stream": "ext://sys.stdout",
         },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "DEBUG",
     },
     "loggers": {
         "django": {
             "handlers": ["console"],
-            "level": "INFO",
-            "propagate": True,
+            "level": "DEBUG",
+            "propagate": False,
         },
-        "": {
+        "cybernexvpn": {
             "handlers": ["console"],
-            "level": "INFO",
+            "level": "DEBUG",
+            "propagate": False,
         },
     },
 }
-
 # Swagger
 SPECTACULAR_SETTINGS = {
     'TITLE': 'NEX API Documentation',

@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 class YookassaCallbackMiddleware:
 
     def __init__(self, get_response):
+        logger.info("YookassaCallbackMiddleware initialized")
         self.get_response = get_response
 
     @staticmethod
@@ -20,9 +21,8 @@ class YookassaCallbackMiddleware:
         return request.META.get("REMOTE_ADDR")
 
     def __call__(self, request):
-        if "yookassa" in request.path:
-            client_ip = self.get_client_ip(request)
-            logger.info(f"client_ip: {client_ip}")
+        client_ip = self.get_client_ip(request)
+        logger.info(f"client_ip: {client_ip}")
 
         response = self.get_response(request)
         return response
