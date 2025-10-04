@@ -60,7 +60,7 @@ class Server(models.Model):
     name = models.CharField(max_length=31)
     price = models.IntegerField(default=settings.DEFAULT_SUBSCRIPTION_PRICE)
     is_active = models.BooleanField(default=True)
-    config = models.OneToOneField(ServerConfig, on_delete=models.CASCADE)
+    config = models.ForeignKey(ServerConfig, on_delete=models.CASCADE)
     tag = models.CharField(max_length=31)
 
     def __str__(self):
