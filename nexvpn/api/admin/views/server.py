@@ -11,7 +11,7 @@ from nexvpn.models import Server
 @permission_classes([permissions.IsAdmin])
 class ListServersView(ListAPIView):
     serializer_class = ServerSerializer
-    queryset = Server.objects.filter(is_active=True)
+    queryset = Server.objects.filter(is_active=True, is_hidden=False)
 
 
 @extend_schema(tags=["servers"])
