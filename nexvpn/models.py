@@ -58,13 +58,17 @@ class ServerConfig(models.Model):
 
 class Server(models.Model):
     name = models.CharField(max_length=31)
-    price = models.IntegerField(default=settings.DEFAULT_SUBSCRIPTION_PRICE)
+    price = models.IntegerField()
     is_active = models.BooleanField(default=True)
     config = models.ForeignKey(ServerConfig, on_delete=models.CASCADE)
     tag = models.CharField(max_length=31)
+    order = models.IntegerField(default=1)
 
     def __str__(self):
         return self.name
+
+    class Meta:
+        ordering = ['order']
 
 
 class BaseClient(models.Model):
