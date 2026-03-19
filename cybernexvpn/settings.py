@@ -37,6 +37,7 @@ ALLOWED_HOSTS = [
     "www.cybernexvpn.ru",
     "cybernexvpn.ru",
     "localhost",
+    "127.0.0.1",
     "77.238.236.90",
 
     # yookassa

@@ -1,7 +1,7 @@
 from django.contrib import admin
 
 from nexvpn.models import NexUser, UserInvitation, ServerConfig, Server, Client, Endpoint, Payment, Transaction, \
-    UserBalance
+    UserBalance, PromoCode, ProxyServerConfig, ProxyClient
 
 admin.site.register(NexUser)
 admin.site.register(UserInvitation)
@@ -12,3 +12,7 @@ admin.site.register(Endpoint)
 admin.site.register(Payment)
 admin.site.register(Transaction)
 admin.site.register(UserBalance)
+admin.site.register(PromoCode)
+admin.site.register(ProxyServerConfig)
+admin.site.register(ProxyClient)
+

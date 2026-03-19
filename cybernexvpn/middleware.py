@@ -14,7 +14,6 @@ class YookassaCallbackMiddleware:
     @staticmethod
     def get_client_ip(request):
         x_forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
-        logger.info(f"HTTP_X_FORWARDED_FOR: {x_forwarded_for}")
         if x_forwarded_for:
             ip = x_forwarded_for.split(",")[0]
             return ipaddress.ip_address(ip)

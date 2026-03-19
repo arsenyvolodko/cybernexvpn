@@ -2,8 +2,8 @@ import logging
 
 from nexvpn.api_clients import schemas
 from nexvpn.api_clients.base_api_client import BaseAPIClient
-from nexvpn.api_clients.wg_api_client.schemas import CreateClientRequest, DeleteClientRequest, CreateClientsRequest, \
-    DeleteClientsRequest, ClientRequest
+from nexvpn.api_clients.wg_api_client.schemas import CreateWgClientRequest, DeleteWgClientRequest, CreateClientsRequestWg, \
+    DeleteClientsRequestWg, WgClientRequest
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +12,7 @@ class WgAPIClient(BaseAPIClient):
 
     async def _handle_clients_request(
             self,
-            schema: ClientRequest,
+            schema: WgClientRequest,
             method: schemas.Method = schemas.Method.POST,
             many: bool = False
     ) -> None:
@@ -24,14 +24,14 @@ class WgAPIClient(BaseAPIClient):
         )
         await self._make_request(request)
 
-    async def add_client(self, schema: CreateClientRequest) -> None:
+    async def add_client(self, schema: CreateWgClientRequest) -> None:
         await self._handle_clients_request(schema)
 
-    async def delete_client(self, schema: DeleteClientRequest) -> None:
+    async def delete_client(self, schema: DeleteWgClientRequest) -> None:
         await self._handle_clients_request(schema, schemas.Method.DELETE)
 
-    async def add_clients(self, schema: CreateClientsRequest) -> None:
+    async def add_clients(self, schema: CreateClientsRequestWg) -> None:
         await self._handle_clients_request(schema, many=True)
 
-    async def delete_clients(self, schema: DeleteClientsRequest) -> None:
+    async def delete_clients(self, schema: DeleteClientsRequestWg) -> None:
         await self._handle_clients_request(schema, schemas.Method.DELETE, many=True)

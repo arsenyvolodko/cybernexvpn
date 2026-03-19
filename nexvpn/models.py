@@ -226,3 +226,19 @@ class UserBalance(models.Model):
         constraints = [
             models.CheckConstraint(check=models.Q(value__gte=0), name="value_gte_0")
         ]
+
+
+class ProxyServerConfig(models.Model):
+    ip = models.CharField(max_length=15, unique=True)
+    api_key = models.CharField(max_length=63, unique=True)
+    mask_domain = models.CharField(max_length=63)
+    price = models.IntegerField()
+
+
+class ProxyClient(models.Model):
+    user = models.OneToOneField(NexUser, on_delete=models.CASCADE)
+    is_active = models.BooleanField(default=True)
+    auto_renew = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    end_date = models.DateField()
+    secret = models.CharField(max_length=63, unique=True)

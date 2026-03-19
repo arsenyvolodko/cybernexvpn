@@ -9,10 +9,10 @@ from django.utils.timezone import now
 from cybernexvpn.base_model import BaseModel
 from nexvpn.api_clients.schemas import ConfigSchema
 from nexvpn.api_clients.tg_bot_api_client.schemas import UserSubscriptionUpdates, SubscriptionUpdates
-from nexvpn.api_clients.wg_api_client.schemas import DeleteClientsRequest, DeleteClientRequest
+from nexvpn.api_clients.wg_api_client.schemas import DeleteClientsRequestWg, DeleteWgClientRequest
 from nexvpn.enums import TransactionTypeEnum, TransactionStatusEnum, ClientUpdatesEnum
 from nexvpn.models import Client, UserBalance, Transaction, Server, ClientUpdates
-from nexvpn.utils import delete_clients
+from nexvpn.wg_utils import delete_clients
 
 logger = logging.getLogger(__name__)
 
@@ -155,8 +155,8 @@ def delete_clients_from_server(client_to_delete: list[Client]):
         config = server.config
         clients = server_id_clients[server.id]
         config_schema = ConfigSchema(url=config.base_url, api_key=config.api_key)
-        delete_clients_request = DeleteClientsRequest(
-            clients=[DeleteClientRequest(public_key=client.public_key) for client in clients]
+        delete_clients_request = DeleteClientsRequestWg(
+            clients=[DeleteWgClientRequest(public_key=client.public_key) for client in clients]
         )
         asyncio.run(delete_clients(config_schema, delete_clients_request))
 

@@ -4,6 +4,7 @@ from drf_spectacular.views import SpectacularSwaggerView, SpectacularRedocView, 
 from nexvpn.api.admin.views.client import ClientsViewSet, reactivate_client, get_config_file, get_qr_file
 from nexvpn.api.admin.views.invitation import apply_invitation
 from nexvpn.api.admin.views.promo_code import apply_promo_code
+from nexvpn.api.admin.views.proxy_client import ProxyClientsViewSet, reactivate_proxy_client
 from nexvpn.api.admin.views.server import ListServersView, RetrieveServerView
 from nexvpn.api.admin.views.payment import get_transactions_history, create_payment
 from nexvpn.api.admin.views.user import UsersViewSet
@@ -22,6 +23,11 @@ urlpatterns = [
     path("users/<int:user_id>/clients/<int:client_id>/reactivate/", reactivate_client),
     path("users/<int:user_id>/clients/<int:client_id>/qr/", get_qr_file),
     path("users/<int:user_id>/clients/<int:client_id>/config/", get_config_file),
+
+    path("users/<int:user_id>/proxy-clients/", ProxyClientsViewSet.as_view({'get': 'list', 'post': 'create'})),
+    path("users/<int:user_id>/proxy-clients/<int:client_id>/",
+         ProxyClientsViewSet.as_view({'get': 'retrieve', 'patch': 'partial_update', 'delete': 'destroy'})),
+    path("users/<int:user_id>/proxy-clients/<int:client_id>/reactivate/", reactivate_proxy_client),
 
     path("servers/", ListServersView.as_view()),
     path("servers/<int:server_id>/", RetrieveServerView.as_view()),

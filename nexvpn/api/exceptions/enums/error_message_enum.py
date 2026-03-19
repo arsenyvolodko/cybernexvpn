@@ -10,3 +10,7 @@ class ErrorMessageEnum(Enum):
     NOT_ENOUGH_MONEY_TO_REACTIVATE_CLIENT_ERROR_MESSAGE = "На твоем счете недостаточно средств для возобновления подписки(("
 
     CLIENT_IS_ALREADY_ACTIVE_ERROR_MESSAGE = "Данное устройство уже активно."
+
+    PROXY_CLIENT_IS_ALREADY_ACTIVE_ERROR_MESSAGE = "Прокси уже активен."
+    NOT_ENOUGH_MONEY_TO_ACTIVATE_PROXY_ERROR_MESSAGE = "На твоем счете недостаточно средств для активации прокси(("
+

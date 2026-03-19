@@ -1,22 +1,22 @@
 from cybernexvpn.base_model import BaseModel
 
 
-class ClientRequest(BaseModel):
+class WgClientRequest(BaseModel):
     pass
 
 
-class CreateClientRequest(ClientRequest):
+class CreateWgClientRequest(WgClientRequest):
     ip: str
     public_key: str
 
 
-class CreateClientsRequest(ClientRequest):
-    clients: list[CreateClientRequest]
+class CreateClientsRequestWg(WgClientRequest):
+    clients: list[CreateWgClientRequest]
 
 
-class DeleteClientRequest(ClientRequest):
+class DeleteWgClientRequest(WgClientRequest):
     public_key: str
 
 
-class DeleteClientsRequest(ClientRequest):
-    clients: list[DeleteClientRequest]
+class DeleteClientsRequestWg(WgClientRequest):
+    clients: list[DeleteWgClientRequest]
