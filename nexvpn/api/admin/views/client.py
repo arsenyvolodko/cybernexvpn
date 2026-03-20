@@ -27,6 +27,9 @@ from nexvpn.enums import TransactionTypeEnum, ClientUpdatesEnum
 from nexvpn.models import Client, UserBalance, Endpoint, Transaction, NexUser, ClientUpdates
 
 
+logger = logging.getLogger(__name__)
+
+
 @extend_schema(tags=["client"])
 @permission_classes([permissions.IsAdmin])
 class ClientsViewSet(ModelViewSet):
@@ -122,6 +125,7 @@ class ClientsViewSet(ModelViewSet):
         try:
             return super().destroy(request, *args, **kwargs)
         except Exception as e:
+            logger.error(e, exc_info=True)
             data = {"detail": str(e)}
         return Response(data, status=status.HTTP_400_BAD_REQUEST)
 
