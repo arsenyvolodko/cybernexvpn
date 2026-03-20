@@ -24,5 +24,5 @@ class Request(BaseModel):
 class ConfigSchema(BaseModel):
     url: HttpUrl | str
     api_key: str
-    timeout: int = 10
+    timeout: int = 15
 

@@ -13,7 +13,7 @@ class BaseAPIClient(ABC):
     def __init__(self, config: schemas.ConfigSchema):
         self._base_url = config.url
         self._token = config.api_key
-        self._timeout = config.timeout
+        self._timeout = aiohttp.ClientTimeout(total=config.timeout)
         self._session = None
 
     async def __aenter__(self):
