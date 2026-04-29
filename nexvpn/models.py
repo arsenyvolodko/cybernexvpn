@@ -1,3 +1,5 @@
+import uuid
+
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -15,8 +17,11 @@ User = get_user_model()
 
 class NexUser(models.Model):
     username = models.CharField(max_length=63, null=True)
+    first_name = models.CharField(max_length=64, null=True, blank=True)
+    email = models.EmailField(max_length=254, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     user = models.OneToOneField(User, null=True, default=None, on_delete=models.SET_NULL, blank=True)
+    token = models.UUIDField(default=uuid.uuid4, unique=True)
 
     @property
     def balance(self):

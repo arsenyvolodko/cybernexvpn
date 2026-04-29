@@ -37,6 +37,8 @@ ALLOWED_HOSTS = [
     "www.cybernexvpn.ru",
     "cybernexvpn.ru",
     "localhost",
+    "127.0.0.1:8000",
+    "127.0.0.1",
     "77.238.236.90",
 
     # yookassa
@@ -83,30 +85,77 @@ MIDDLEWARE = [
 # DRF
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "EXCEPTION_HANDLER": "nexvpn.api.exception_handler.logging_exception_handler",
 }
+
+LOG_LEVEL = env.str("LOG_LEVEL", default="INFO").upper()
+DJANGO_LOG_LEVEL = env.str("DJANGO_LOG_LEVEL", default="INFO").upper()
 
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{asctime}.{msecs:03.0f} | {levelname:<8} | {name}:{lineno} | {message}",
+            "datefmt": "%Y-%m-%d %H:%M:%S",
+            "style": "{",
+        },
+    },
     "handlers": {
         "console": {
             "class": "logging.StreamHandler",
             "stream": "ext://sys.stdout",
+            "formatter": "verbose",
         },
     },
     "root": {
         "handlers": ["console"],
-        "level": "INFO",
+        "level": LOG_LEVEL,
     },
     "loggers": {
         "django": {
             "handlers": ["console"],
+            "level": DJANGO_LOG_LEVEL,
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "django.server": {
+            "handlers": ["console"],
             "level": "INFO",
+            "propagate": False,
+        },
+        "django.db.backends": {
+            "handlers": ["console"],
+            "level": env.str("DB_LOG_LEVEL", default="WARNING").upper(),
+            "propagate": False,
+        },
+        "celery": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "celery.task": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "celery.beat": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
             "propagate": False,
         },
         "cybernexvpn": {
             "handlers": ["console"],
-            "level": "INFO",
+            "level": LOG_LEVEL,
+            "propagate": False,
+        },
+        "nexvpn": {
+            "handlers": ["console"],
+            "level": LOG_LEVEL,
             "propagate": False,
         },
     },

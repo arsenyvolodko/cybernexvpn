@@ -4,6 +4,7 @@ import logging
 from collections import defaultdict
 
 from dateutil.relativedelta import relativedelta
+from django.db.models import Q
 from django.utils.timezone import now
 
 from cybernexvpn.base_model import BaseModel
@@ -62,15 +63,18 @@ def get_clients_by_groups(user_id: int, date_time: datetime) -> ClientsSchema:
 
 
 def get_users_with_clients_to_update(date_time: datetime, is_reminder: bool) -> list[int]:
-    filter_name = "end_date" if is_reminder else "end_date__lte"
-    filters = {
-        "is_active": True,
-        filter_name: date_time.date(),
-    }
+    if is_reminder:
+        clients_filter = Q(is_active=True, end_date=date_time.date())
+    else:
+        delete_cutoff = (date_time - relativedelta(months=2)).date()
+        clients_filter = (
+            Q(is_active=True, end_date__lte=date_time.date())
+            | Q(is_active=False, end_date__lte=delete_cutoff)
+        )
 
     users_with_clients_to_update = (
         Client.objects
-        .filter(**filters)
+        .filter(clients_filter)
         .values_list("user", flat=True)
         .distinct()
     )

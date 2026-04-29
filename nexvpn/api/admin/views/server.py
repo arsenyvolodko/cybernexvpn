@@ -8,14 +8,14 @@ from nexvpn.models import Server
 
 
 @extend_schema(tags=["servers"])
-@permission_classes([permissions.IsAdmin])
+@permission_classes([permissions.IsAdminOrUser])
 class ListServersView(ListAPIView):
     serializer_class = ServerSerializer
     queryset = Server.objects.filter(is_active=True, is_hidden=False)
 
 
 @extend_schema(tags=["servers"])
-@permission_classes([permissions.IsAdmin])
+@permission_classes([permissions.IsAdminOrUser])
 class RetrieveServerView(RetrieveAPIView):
     queryset = Server.objects.filter(is_active=True)
     serializer_class = ServerSerializer
