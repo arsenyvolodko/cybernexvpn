@@ -19,7 +19,10 @@ class ClientSerializer(serializers.ModelSerializer):
             if self.context['request'].method == 'PATCH':
                 self.fields['server_id'].read_only = True
             if self.context['request'].method == 'POST':
-                self.fields.pop('auto_renew')
+                # При создании клиента auto_renew не принимаем от клиента (значение
+                # ставит сама модель — default=True), но в ответе поле должно быть,
+                # чтобы фронт сразу отрисовал актуальный toggle.
+                self.fields['auto_renew'].read_only = True
 
     class Meta:
         model = Client
