@@ -1,5 +1,7 @@
 import logging
 import tempfile
+
+logger = logging.getLogger(__name__)
 import uuid
 from datetime import timedelta
 
@@ -14,6 +16,7 @@ from rest_framework.response import Response
 from yookassa.domain.response import PaymentResponse
 
 from nexvpn import permissions
+from nexvpn.permissions import check_ownership
 from nexvpn.api.admin.serializers.payment_serializers import PaymentRequestSerializers, PaymentResponseSerializer
 from nexvpn.utils import gen_yookassa_payment_data
 from nexvpn.enums import TransactionTypeEnum, TransactionStatusEnum
@@ -22,14 +25,20 @@ from nexvpn.models import Transaction, NexUser, Payment
 
 @extend_schema(request=PaymentRequestSerializers, responses={201: PaymentResponseSerializer}, tags=["payments"])
 @api_view(["POST"])
-@permission_classes([permissions.IsAdmin])
+@permission_classes([permissions.IsAdminOrUser])
 def create_payment(request, user_id: int) -> Response:
+    check_ownership(request, user_id)
     user = get_object_or_404(NexUser, pk=user_id)
     serializer = PaymentRequestSerializers(data=request.data)
     serializer.is_valid(raise_exception=True)
 
     value = serializer.validated_data["value"]
-    payment_data = gen_yookassa_payment_data(value)
+    return_url = serializer.validated_data["return_url"]
+    email = serializer.validated_data["email"]
+    if email and user.email != email:
+        user.email = email
+        user.save(update_fields=["email"])
+    payment_data = gen_yookassa_payment_data(value, return_url, email)
     try:
         with transaction.atomic():
             idempotence_key = uuid.uuid4()
@@ -49,19 +58,16 @@ def create_payment(request, user_id: int) -> Response:
             response_serializer = PaymentResponseSerializer(data={"url": url})
             response_serializer.is_valid(raise_exception=True)
             return Response(response_serializer.validated_data, status=201)
-    except TypeError or AttributeError as e:
-        error_msg = f"Cannot create yookassa payment:\npayment_data:{payment_data}\n{e}"
     except Exception as e:
-        error_msg = f"Cannot create yookassa payment:\n{e}\npayment_json: {yookassa_payment.json()}"
-
-    logging.error(error_msg, exc_info=True)  # noqa
-    return Response({"detail": error_msg}, status=400)
+        logger.error(f"Cannot create yookassa payment: {e}", exc_info=True)
+        return Response({"detail": "Payment creation failed"}, status=400)
 
 
 @extend_schema(tags=["payments"])
 @api_view(["GET"])
-@permission_classes([permissions.IsAdmin])
+@permission_classes([permissions.IsAdminOrUser])
 def get_transactions_history(request, user_id: int) -> FileResponse:
+    check_ownership(request, user_id)
     user = get_object_or_404(NexUser, pk=user_id)
     res = f"Данные актуальны на момент {now().strftime("%d.%m.%Y %H:%M:%S")}.\n\n"
     res += f"Текущий баланс: {user.balance}₽\n\n"

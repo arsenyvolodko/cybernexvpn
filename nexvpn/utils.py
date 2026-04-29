@@ -1,4 +1,3 @@
-import uuid
 from typing import Any, Callable
 
 from django.conf import settings
@@ -60,15 +59,16 @@ def gen_client_config_data(client: Client) -> str:
     return file_data
 
 
-def gen_yookassa_payment_data(value: int) -> dict[str, Any]:
+def gen_yookassa_payment_data(value: int, return_url: str | None = None, email: str | None = None) -> dict[str, Any]:
     payment_data = {
         "amount": {"value": f"{value}.00", "currency": "RUB"},
         "confirmation": {
             "type": "redirect",
-            "return_url": settings.TG_BOT_URL,
+            "return_url": return_url or settings.TG_BOT_URL,
         },
         "capture": True,
-        "description": f"Пополнение баланса на {value} рублей"
+        "description": f"Пополнение баланса на {value} рублей",
     }
-
+    if email:
+        payment_data["metadata"] = {"customer_email": email}
     return payment_data

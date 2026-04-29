@@ -17,6 +17,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from nexvpn import permissions
+from nexvpn.permissions import check_ownership
 from nexvpn.api.admin.serializers.client_serializers import ClientSerializer
 from nexvpn.api.exceptions.base_client_error import BaseClientError
 from nexvpn.api.exceptions.enums.error_message_enum import ErrorMessageEnum
@@ -31,20 +32,25 @@ logger = logging.getLogger(__name__)
 
 
 @extend_schema(tags=["client"])
-@permission_classes([permissions.IsAdmin])
+@permission_classes([permissions.IsAdminOrUser])
 class ClientsViewSet(ModelViewSet):
     queryset = Client.objects.all()
     serializer_class = ClientSerializer
     lookup_url_kwarg = "client_id"
 
+    def _user_id(self) -> int:
+        user_id = int(self.kwargs.get("user_id"))
+        check_ownership(self.request, user_id)
+        return user_id
+
     def filter_queryset(self, queryset) -> QuerySet[Client]:
-        user_id = self.kwargs.get("user_id")
+        user_id = self._user_id()
         if client_id := self.kwargs.get("client_id"):
             queryset = queryset.filter(pk=client_id)
         return queryset.filter(user_id=user_id).order_by("num")
 
     def perform_create(self, serializer: ClientSerializer, *args, **kwargs) -> None:
-        user_id = self.kwargs.get("user_id")
+        user_id = self._user_id()
         server = serializer.validated_data["server"]
 
         user = get_object_or_404(NexUser, pk=user_id)
@@ -115,10 +121,10 @@ class ClientsViewSet(ModelViewSet):
             return super().create(request, *args, **kwargs)
         except BaseClientError as e:
             data = {"error_message": e.message}
-            logging.info(f"Cannot create client: {e.message}")
+            logger.info(f"Cannot create client: {e.message}")
         except Exception as e:
             data = {"detail": str(e)}
-            logging.error(f"Error creating client: {e}", exc_info=True)
+            logger.error(f"Error creating client: {e}", exc_info=True)
         return Response(data, status=status.HTTP_400_BAD_REQUEST)
 
     def destroy(self, request: Request, *args, **kwargs) -> Response:
@@ -132,8 +138,9 @@ class ClientsViewSet(ModelViewSet):
 
 @extend_schema(tags=["client"], responses={200: ClientSerializer})
 @api_view(["POST"])
-@permission_classes([permissions.IsAdmin])
+@permission_classes([permissions.IsAdminOrUser])
 def reactivate_client(request: Request, user_id: int, client_id: int) -> Response:  # noqa
+    check_ownership(request, user_id)
     client = get_object_or_404(Client, pk=client_id, user_id=user_id)
 
     try:
@@ -180,19 +187,20 @@ def reactivate_client(request: Request, user_id: int, client_id: int) -> Respons
         return Response(status=status.HTTP_200_OK, data=ClientSerializer(client).data)
 
     except BaseClientError as e:
-        logging.info(f"Cannot reactivate client: {e.message}")
+        logger.info(f"Cannot reactivate client: {e.message}")
         data = {"error_message": e.message}
     except Exception as e:
         data = {"detail": str(e)}
-        logging.error(f"Error reactivating client: {e}", exc_info=True)
+        logger.error(f"Error reactivating client: {e}", exc_info=True)
 
     return Response(data, status=status.HTTP_400_BAD_REQUEST)
 
 
 @extend_schema(tags=["client"])
 @api_view(["GET"])
-@permission_classes([permissions.IsAdmin])
+@permission_classes([permissions.IsAdminOrUser])
 def get_config_file(request: Request, user_id: int, client_id: int) -> FileResponse:
+    check_ownership(request, user_id)
     client = get_object_or_404(Client, pk=client_id, user_id=user_id)
     client_data = gen_client_config_data(client)
 
@@ -205,8 +213,9 @@ def get_config_file(request: Request, user_id: int, client_id: int) -> FileRespo
 
 @extend_schema(tags=["client"])
 @api_view(["GET"])
-@permission_classes([permissions.IsAdmin])
+@permission_classes([permissions.IsAdminOrUser])
 def get_qr_file(request: Request, user_id: int, client_id: int) -> FileResponse:
+    check_ownership(request, user_id)
     client = get_object_or_404(Client, pk=client_id, user_id=user_id)
     client_data = gen_client_config_data(client)
 

@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 
+logger = logging.getLogger(__name__)
+
 from django.db import transaction
 from rest_framework.decorators import api_view
 from rest_framework.request import Request
@@ -21,7 +23,7 @@ def handle_notification(request: Request) -> Response:
     try:
         webhook = WebhookNotification(payment_json)
     except Exception as e:
-        logging.error(f"Error parsing webhook: {e}")
+        logger.error(f"Error parsing webhook: {e}")
         return Response(status=400)
 
     if not (webhook.type == EXPECTED_WEBHOOK_TYPE and webhook.event in PaymentStatusEnum.values):
@@ -35,9 +37,10 @@ def handle_notification(request: Request) -> Response:
     payment_transaction: Transaction = Transaction.objects.filter(payment__isnull=False, payment=payment).first()
 
     if not (payment and payment_transaction):
-        logging.info(f"Cannot process webhook: payment or transaction not found:\n"
-                     f"payment_id={payment_obj.id}, transaction_id={payment_transaction.id}.\n"
-                     f"Webhook data: {payment_json}")
+        logger.warning(
+            f"Cannot process webhook: payment or transaction not found: "
+            f"payment_id={payment_obj.id}. Webhook data: {payment_json}"
+        )
 
         # Return 200 to YooKassa to avoid repeated requests
         return Response(status=200)

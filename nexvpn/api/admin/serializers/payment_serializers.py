@@ -3,6 +3,8 @@ from rest_framework import serializers
 
 class PaymentRequestSerializers(serializers.Serializer):
     value = serializers.IntegerField()
+    return_url = serializers.URLField(required=False, allow_null=True, default=None)
+    email = serializers.EmailField(required=False, allow_null=True, default=None)
 
     def validate(self, attrs):
         value = attrs.get('value')
@@ -11,7 +13,7 @@ class PaymentRequestSerializers(serializers.Serializer):
         return attrs
 
     class Meta:
-        fields = ('value', )
+        fields = ('value', 'return_url', 'email')
 
 
 class PaymentResponseSerializer(serializers.Serializer):

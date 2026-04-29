@@ -5,3 +5,5 @@ __pycache__/
 .env.prod
 /data/
 celerybeat-schedule.db
+CLAUDE.md
+draft.py

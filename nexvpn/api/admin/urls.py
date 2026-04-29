@@ -1,3 +1,5 @@
+from django.conf import settings
+from django.contrib.admin.views.decorators import staff_member_required
 from django.urls import path
 from drf_spectacular.views import SpectacularSwaggerView, SpectacularRedocView, SpectacularAPIView
 
@@ -8,9 +10,13 @@ from nexvpn.api.admin.views.server import ListServersView, RetrieveServerView
 from nexvpn.api.admin.views.payment import get_transactions_history, create_payment
 from nexvpn.api.admin.views.user import UsersViewSet
 
+
+def _docs_protected(view):
+    return view if settings.DEBUG else staff_member_required(view)
+
 urlpatterns = [
     path("users/", UsersViewSet.as_view({'get': 'list'})),
-    path("users/<int:user_id>/", UsersViewSet.as_view({'get': 'retrieve', 'post': 'create'})),
+    path("users/<int:user_id>/", UsersViewSet.as_view({'get': 'retrieve', 'post': 'create', 'patch': 'partial_update'})),
 
     path("users/<int:user_id>/payments/", create_payment),
     path("users/<int:user_id>/payments/history/", get_transactions_history),
@@ -26,7 +32,7 @@ urlpatterns = [
     path("servers/", ListServersView.as_view()),
     path("servers/<int:server_id>/", RetrieveServerView.as_view()),
 
-    path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
-    path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
-    path('schema/', SpectacularAPIView.as_view(), name='schema'),
+    path('docs/', _docs_protected(SpectacularSwaggerView.as_view(url_name='schema')), name='swagger-ui'),
+    path('redoc/', _docs_protected(SpectacularRedocView.as_view(url_name='schema')), name='redoc'),
+    path('schema/', _docs_protected(SpectacularAPIView.as_view()), name='schema'),
 ]
