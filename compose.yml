@@ -52,19 +52,5 @@ services:
     volumes:
       - ./data/backend/static/:/app/data/backend/static/
 
-  postgres:
-    image: postgres:15
-    restart: unless-stopped
-    ports:
-      - "${POSTGRES_PORT}:5432"
-    env_file:
-      - .env
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
-    volumes:
-      - ./data/postgres:/var/lib/postgresql/data
-
 volumes:
   redis_data:
