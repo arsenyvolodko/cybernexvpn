@@ -53,7 +53,7 @@ ALLOWED_HOSTS = [
     "2a02:5180::/32"
 ]
 
-CSRF_TRUSTED_ORIGINS = [BASE_URL] + ALLOWED_HOSTS
+CSRF_TRUSTED_ORIGINS = [BASE_URL, "https://www.cybernexvpn.ru", "https://cybernexvpn.ru"]
 
 APPEND_SLASH = False
 
