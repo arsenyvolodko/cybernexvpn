@@ -1,31 +1,26 @@
-import asyncio
+"""Периодическая работа.
+
+Задача ровно одна и она про надёжность: если панель лежала в момент оплаты,
+подписка остаётся в статусе FAILED, и без повторов человек заплатил, но доступа
+не получил. Всё остальное считается лениво, по обращению.
+
+Отложенное понижение тарифа планировщика не требует — см.
+`nexvpn.subscription.service.ensure_current_plan`.
+"""
+
 import logging
-from datetime import datetime, timedelta
 
 from celery import shared_task
-from django.conf import settings
 
-from nexvpn.api_clients import TgBotAPIClient
-from nexvpn.api_clients.schemas import ConfigSchema
-from nexvpn.api_clients.tg_bot_api_client.schemas import SubscriptionUpdates
-from nexvpn.subscription.updates import get_updates_schema
-
+from nexvpn.subscription import panel_sync
 
 logger = logging.getLogger(__name__)
 
 
-async def _send_updates_util(updates: SubscriptionUpdates):
-    config_schema = ConfigSchema(
-        url=settings.TG_BOT_API_URL,
-        api_key=settings.TG_BOT_API_KEY
-    )
-    async with TgBotAPIClient(config_schema) as api_client:
-        await api_client.make_subscription_updates(updates)
-
-
 @shared_task()
-def send_updates(today: bool, is_reminder: bool):
-    logger.info(f"Starting subscription task: today: {today}, is_reminder: {is_reminder}")
-    updates_schema = get_updates_schema(today, is_reminder)
-    logger.info(f"Sending subscription updates task: {updates_schema}")
-    asyncio.run(_send_updates_util(updates_schema))
+def sync_panel():
+    """Догнать подписки, которые не доехали до Remnawave."""
+    ok, failed = panel_sync.sync_pending()
+    if ok or failed:
+        logger.info("Синхронизация с панелью: успешно %s, с ошибкой %s", ok, failed)
+    return {"ok": ok, "failed": failed}

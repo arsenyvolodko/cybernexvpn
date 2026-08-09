@@ -2,6 +2,11 @@ from django.db import models
 
 
 class TransactionTypeEnum(models.TextChoices):
+    # Актуальные типы (VLESS, тариф = устройства + срок)
+    PURCHASE_SUBSCRIPTION = "purchase_subscription", "Оплата подписки"
+    PLAN_UPGRADE = "plan_upgrade", "Доплата за переход на больший тариф"
+
+    # Легаси-типы: больше не создаются, но остаются в истории старых записей
     RENEW_SUBSCRIPTION = "renew_subscription", "Продление подписки"
     REACTIVATE_CLIENT = "reactivate_clint", "Возобновление подписки"
     INVITATION = "invitation", "Приглашение пользователя"

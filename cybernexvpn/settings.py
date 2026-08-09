@@ -263,9 +263,46 @@ TG_BOT_URL = env.str("TG_BOT_URL")
 TG_BOT_API_URL = env.str("TG_BOT_API_URL")
 TG_BOT_API_KEY = env.str("TG_BOT_API_KEY")
 
+# Remnawave
+PANEL_API_URL = env.str("PANEL_API_URL", "https://panel.pineferry.com")
+PANEL_API_TOKEN = env.str("PANEL_API_TOKEN", "")
+PANEL_API_TIMEOUT = env.int("PANEL_API_TIMEOUT", 15)
+
 # Business Variables
-START_BALANCE = env.int("START_PRICE", 150)
-INVITATION_BONUS = env.int("INVITATION_BONUS", 50)
+# Длина расчётного периода. Цены тарифов заданы за этот срок, из него же считается
+# стоимость дня при смене тарифа. 30, а не «календарный месяц», — чтобы вся
+# арифметика оставалась целочисленной и предсказуемой.
+DAYS_IN_PERIOD = env.int("DAYS_IN_PERIOD", 30)
+
+# Пробный период для по-настоящему новых пользователей.
+TRIAL_DAYS = env.int("TRIAL_DAYS", 3)
+TRIAL_PLAN_DEVICES = env.int("TRIAL_PLAN_DEVICES", 3)
+
+# Реферальная программа: обоим начисляется после ПЕРВОЙ оплаты приглашённого.
+REFERRAL_INVITER_DAYS = env.int("REFERRAL_INVITER_DAYS", 10)
+REFERRAL_INVITEE_DAYS = env.int("REFERRAL_INVITEE_DAYS", 10)
+
+# Миграция старой базы
+LEGACY_CUTOFF_DATE = env.str("LEGACY_CUTOFF_DATE", "2026-08-03")
+LEGACY_MAX_DEVICES = env.int("LEGACY_MAX_DEVICES", 10)
+# Кому на дату среза не досталось ни одного активного устройства: эти уже ушли,
+# 30 дней — попытка вернуть.
+LEGACY_NO_DEVICES_DAYS = env.int("LEGACY_NO_DEVICES_DAYS", 30)
+LEGACY_NO_DEVICES_PLAN_DEVICES = env.int("LEGACY_NO_DEVICES_PLAN_DEVICES", 3)
+# Нижний порог. С 3 августа бот фактически не работал, пополниться было негде,
+# поэтому у кого период кончился в эти дни — не виноваты и без подписки не остаются.
+LEGACY_MIN_DAYS = env.int("LEGACY_MIN_DAYS", 7)
+# Потолок на конвертацию, чтобы пара человек с огромным балансом не сидела бесплатно годами.
+LEGACY_MAX_DAYS = env.int("LEGACY_MAX_DAYS", 180)
+# Аккаунты, которым баланс заливали руками мимо транзакций (свои и друзья): вместо
+# конвертации получают условно бесконечную подписку на максимальном тарифе.
+# Порог выбран по реальным данным — выше 1000₽ ровно эти шестеро, следующий баланс 850₽.
+LEGACY_UNLIMITED_BALANCE = env.int("LEGACY_UNLIMITED_BALANCE", 1000)
+LEGACY_UNLIMITED_DAYS = env.int("LEGACY_UNLIMITED_DAYS", 3650)
+LEGACY_UNLIMITED_PLAN_DEVICES = env.int("LEGACY_UNLIMITED_PLAN_DEVICES", 10)
+
+# Настройки чека 54-ФЗ живут не здесь, а в модели GlobalSettings — чтобы их
+# можно было включить и поправить из админки, когда подключится касса.
 
 SEND_UPDATES_REMINDER_TIME = env.str("SEND_UPDATES_REMINDER_TIME", "10:00")
 SEND_UPDATES_TIME = env.str("SEND_UPDATES_TIME", "03:00")

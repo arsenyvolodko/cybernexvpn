@@ -1,5 +1,4 @@
 from django.conf import settings
-from django.db import transaction
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
@@ -8,45 +7,38 @@ from rest_framework.response import Response
 
 from nexvpn import permissions
 from nexvpn.api.admin.serializers.invitation_serializers import InvitationRequestSerializer
-from nexvpn.enums import TransactionTypeEnum
-from nexvpn.models import NexUser, UserInvitation, UserBalance, Transaction
+from nexvpn.models import NexUser
+from nexvpn.subscription import service
 
 
 @extend_schema(tags=["users"], request=InvitationRequestSerializer)
 @api_view(["POST"])
 @permission_classes([permissions.IsAdmin])
 def apply_invitation(request, *args, **kwargs):
+    """Переход по реферальной ссылке.
 
+    Дней здесь никто не получает: бонусы начисляются только после первой
+    оплаты приглашённого. Инвайтеру бот сразу пишет, что бонус его ждёт —
+    отсюда возвращается всё, что для этого сообщения нужно.
+    """
     invitee_id = kwargs.get("user_id")
     serializer = InvitationRequestSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    inviter_id = serializer.validated_data["inviter"]
 
-    if inviter_id == invitee_id:
-        return Response({"error_message": "Приглашенный пользователь и пригласитель должны отличаться."},
-                        status=status.HTTP_400_BAD_REQUEST)
-
-    inviter = get_object_or_404(NexUser, pk=inviter_id)
+    inviter = get_object_or_404(NexUser, pk=serializer.validated_data["inviter"])
     invitee = get_object_or_404(NexUser, pk=invitee_id)
 
-    if UserInvitation.objects.filter(invitee=invitee).exists():
-        return Response({"detail": "Пользователь уже был приглашен."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        invitation = service.register_invitation(inviter, invitee)
+    except service.SubscriptionError as exc:
+        return Response({"error_message": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
-    with transaction.atomic():
-        UserInvitation.objects.create(
-            inviter=inviter,
-            invitee=invitee
-        )
-
-        Transaction.objects.create(
-            user=inviter,
-            is_credit=True,
-            value=settings.INVITATION_BONUS,
-            type=TransactionTypeEnum.INVITATION,
-        )
-
-        user_balance = UserBalance.objects.select_for_update().get(user=inviter)
-        user_balance.value += settings.INVITATION_BONUS
-        user_balance.save()
-
-        return Response()
+    return Response(
+        {
+            "inviter": inviter.pk,
+            "invitee": invitee.pk,
+            "inviter_bonus_days": settings.REFERRAL_INVITER_DAYS,
+            "invitee_bonus_days": settings.REFERRAL_INVITEE_DAYS,
+            "granted": invitation.reward_granted_at is not None,
+        }
+    )
