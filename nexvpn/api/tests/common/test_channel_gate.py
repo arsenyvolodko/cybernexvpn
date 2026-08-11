@@ -99,3 +99,54 @@ def test_gate_middleware_is_registered_after_user():
     source = (Path(__file__).resolve().parents[4] / "bot" / "main.py").read_text()
     assert "UserMiddleware()" in source and "ChannelGateMiddleware()" in source
     assert source.index("UserMiddleware()") < source.index("ChannelGateMiddleware()")
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [("/start", True), ("/start 123456", True), ("/start@CyberNexVpnBot", True),
+     ("привет", False), ("/menu", False), ("", False), ("/startle", False)],
+)
+def test_start_is_recognised(text, expected):
+    from bot.middlewares.channel_gate import is_start_command
+
+    assert is_start_command(text) is expected
+
+
+def test_gate_middleware_actually_runs():
+    """Прогоняем middleware целиком.
+
+    Первая версия падала на `CommandStart()(event)` — фильтру aiogram нужен
+    ещё и бот. В бою это закрывало вход **всем** новичкам: сообщение об ошибке
+    в лог, человеку — тишина. Проверки «зарегистрирован ли middleware» такое
+    не ловят, нужен настоящий вызов.
+    """
+    import asyncio
+
+    from aiogram.types import Chat, Message, User as TgUser
+
+    from bot.middlewares.channel_gate import ChannelGateMiddleware
+
+    user = NexUserFactory(is_legacy=False, joined_channel=False)
+    sent = []
+
+    class FakeMessage(Message):
+        async def answer(self, text, **kwargs):
+            sent.append(text)
+
+    def make(text):
+        return FakeMessage(
+            message_id=1, date=0, chat=Chat(id=user.pk, type="private"),
+            from_user=TgUser(id=user.pk, is_bot=False, first_name="t"), text=text,
+        )
+
+    passed = []
+
+    async def handler(event, data):
+        passed.append(event.text)
+
+    middleware = ChannelGateMiddleware()
+    asyncio.run(middleware(handler, make("/start"), {"user": user}))
+    asyncio.run(middleware(handler, make("привет"), {"user": user}))
+
+    assert passed == ["/start"], "/start обязан доходить до хендлера"
+    assert len(sent) == 1 and "канал" in sent[0], "остальное упирается в заслон"
