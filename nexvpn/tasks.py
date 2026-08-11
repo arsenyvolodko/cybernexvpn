@@ -31,6 +31,13 @@ def send_subscription_reminders():
 
     from bot.main import build_bot
     from bot.notifications import send_due_reminders
+    from nexvpn.models import GlobalSettings
+
+    if not GlobalSettings.load().reminders_enabled:
+        # Выключено в админке: обычно потому, что люди ещё не знают о
+        # перезапуске. Остальные задачи по расписанию при этом работают.
+        logger.info("Напоминания выключены в настройках — пропускаю")
+        return {"skipped": True}
 
     async def _run():
         bot = build_bot()

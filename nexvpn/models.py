@@ -312,6 +312,13 @@ class GlobalSettings(models.Model):
         verbose_name="Ориентировочно до",
         help_text="Необязательно. Если указать, бот сможет назвать срок в заглушке.",
     )
+    reminders_enabled = models.BooleanField(
+        default=True,
+        verbose_name="Напоминания об окончании подписки",
+        help_text="Выключите, если люди ещё не знают о перезапуске: иначе "
+                  "«осталось 7 дней» прилетит раньше объявления. Сбор статистики "
+                  "и сверка платежей продолжают работать.",
+    )
     maintenance_affects_admin = models.BooleanField(
         default=False,
         verbose_name="Заглушка и для админа",
