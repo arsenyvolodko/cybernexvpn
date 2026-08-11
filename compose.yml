@@ -56,7 +56,9 @@ services:
       dockerfile: Dockerfile
     env_file:
       - .env
-    command: celery -A cybernexvpn.celery.app beat --loglevel=info
+    # Файл расписания — во временную папку, а не в каталог проекта: там он
+    # попадал в git и запекался в образ, ломая beat на другой платформе.
+    command: celery -A cybernexvpn.celery.app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
     depends_on:
       - redis
     restart: on-failure

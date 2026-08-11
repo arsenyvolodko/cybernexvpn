@@ -4,7 +4,10 @@ __pycache__/
 .env.stage
 .env.prod
 /data/
-celerybeat-schedule.db
+# Состояние планировщика celery. Раньше тут стоял только `.db`, а celery
+# создаёт файлы без суффикса — они попали в git и сломали beat на сервере:
+# формат dbm зависит от платформы, и чужой файл не читается.
+celerybeat-schedule*
 CLAUDE.md
 draft.py
 *.sql.gz
