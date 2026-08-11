@@ -144,3 +144,19 @@ def test_message_says_what_was_bought(monkeypatch):
 
     assert "Оплата прошла" in sent[0]
     assert "3 устройства" in sent[0]
+
+
+def test_test_payment_grants_nothing_but_confirms(monkeypatch):
+    """Проверочный платёж существует ради факта подтверждения, а не ради дней."""
+    payment, subscription = make_payment(kind=PaymentKindEnum.TEST, amount=5)
+    before = subscription.expires_at
+    patch_yookassa(monkeypatch)
+    sent = []
+    monkeypatch.setattr("bot.notify.notify_payment_applied", lambda chat_id, text: sent.append(text))
+
+    reconcile.reconcile()
+
+    subscription.refresh_from_db()
+    assert subscription.expires_at == before, "проверочный платёж не должен продлевать подписку"
+    assert "Проверочный платёж" in sent[0]
+    assert "опрос" in sent[0], "надо видеть, каким путём пришло подтверждение"

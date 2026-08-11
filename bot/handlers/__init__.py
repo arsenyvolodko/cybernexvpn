@@ -1,6 +1,7 @@
 from aiogram import Router
 
 from bot.handlers import (
+    admin,
     billing,
     broadcast,
     channel,
@@ -17,6 +18,9 @@ from bot.handlers import (
 def build_router() -> Router:
     """Порядок важен: legacy-роутер ловит всё нераспознанное, он последний."""
     root = Router(name="root")
+    # Служебное — раньше всего: команда админа не должна конкурировать
+    # с обычными сценариями.
+    root.include_router(admin.router)
     root.include_router(menu.router)
     root.include_router(subscription.router)
     root.include_router(connect.router)

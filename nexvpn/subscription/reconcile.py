@@ -62,18 +62,36 @@ def _status_of(payment: Payment) -> str | None:
     return response.json().get("status")
 
 
-def notify_paid(payment: Payment, subscription) -> None:
+def notify_paid(payment: Payment, subscription, *, source: str) -> None:
     """Сообщить человеку, что оплата прошла.
 
     Живёт здесь, чтобы вебхук и сверка звали одно и то же: два похожих, но
     разных сообщения об одном событии — верный способ однажды отправить оба.
+    `source` показываем только в проверочном платеже: обычному человеку
+    неинтересно, каким путём пришло подтверждение, а нам это главный ответ на
+    вопрос «доходят ли вебхуки».
     """
+    from django.utils.timezone import localtime
+
     from bot import texts
     from bot.notify import notify_payment_applied
+    from nexvpn.enums import PaymentKindEnum
 
-    if subscription is None or payment.user_id is None:
+    if payment.user_id is None:
         return
-    from django.utils.timezone import localtime
+
+    if payment.kind == PaymentKindEnum.TEST:
+        elapsed = (now() - payment.created_at).total_seconds()
+        notify_payment_applied(
+            payment.user_id,
+            texts.TEST_PAYMENT_OK.format(
+                amount=payment.amount, source=source, seconds=round(elapsed)
+            ),
+        )
+        return
+
+    if subscription is None:
+        return
 
     notify_payment_applied(
         payment.user_id,
@@ -114,7 +132,7 @@ def reconcile() -> ReconcileResult:
         logger.info("Добрали платёж %s на %s₽ для %s", locked.uuid, locked.amount, locked.user_id)
         if subscription is not None:
             panel_sync.sync_subscription(subscription)
-        notify_paid(locked, subscription)
+        notify_paid(locked, subscription, source="опрос")
 
     if result.applied or result.failed:
         logger.info(

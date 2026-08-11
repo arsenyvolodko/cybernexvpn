@@ -352,6 +352,28 @@ def get_plan_options(user: NexUser) -> tuple[Subscription | None, list[PlanOptio
 
 
 @sync_to_async
+def start_test_payment(user: NexUser, amount: int, return_url: str) -> str:
+    """Проверочный платёж: настоящие деньги, но ничего не начисляет.
+
+    Тариф передаём самый дешёвый — он нужен лишь для описания платежа, а до
+    начисления дело не дойдёт: `PaymentKindEnum.TEST` останавливает выдачу.
+    """
+    plan = Plan.objects.filter(is_active=True).order_by("price_month").first()
+    if plan is None:
+        raise service.SubscriptionError("В базе нет ни одного тарифа")
+    created = payments.create_payment(
+        user,
+        plan,
+        amount=amount,
+        days=0,
+        months=1,
+        kind=PaymentKindEnum.TEST,
+        return_url=return_url,
+    )
+    return created.url
+
+
+@sync_to_async
 def start_renew_payment(user: NexUser, months: int, return_url: str) -> str:
     """Создать платёж за продление и вернуть ссылку на оплату."""
     subscription = Subscription.objects.select_related("plan").get(user=user)

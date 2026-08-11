@@ -72,13 +72,17 @@ def handle_notification(request: Request) -> Response:
         # Панель дёргаем уже после коммита: её недоступность не должна откатывать оплату.
         panel_sync.sync_subscription(subscription)
     # Сообщение — тем же кодом, что и у сверки: событие одно, текст должен быть один.
-    reconcile.notify_paid(payment, subscription)
+    reconcile.notify_paid(payment, subscription, source="вебхук")
 
     return Response(status=200)
 
 
 def _apply_payment(payment: Payment):
     """Выдать то, за что заплачено. Условия берём из Payment, не из вебхука."""
+    if payment.kind == PaymentKindEnum.TEST:
+        # Проверочный платёж существует ради самого факта подтверждения.
+        return None
+
     if payment.user is None or payment.plan is None:
         logger.error("Платёж %s без пользователя или тарифа — начислять нечего", payment.uuid)
         return None
