@@ -21,6 +21,7 @@ from nexvpn.models import (
     DeviceConnectionWatch,
     GlobalSettings,
     NexUser,
+    Payment,
     Plan,
     Subscription,
     SubscriptionEvent,
@@ -308,9 +309,15 @@ class PlanOption:
 
 @sync_to_async
 def get_renew_options(user: NexUser) -> tuple[Subscription | None, list[PeriodOption]]:
-    subscription = Subscription.objects.select_related("plan").filter(user=user).first()
+    subscription = (
+        Subscription.objects.select_related("plan", "next_plan").filter(user=user).first()
+    )
     if subscription is None:
         return None, []
+    # Подписка могла истечь с запланированным понижением: тогда человек уже на
+    # новом тарифе, и продлевать надо его. Без этого мы показывали и списывали
+    # старую, более дорогую цену за тариф, от которого человек сам отказался.
+    subscription = service.ensure_current_plan(subscription)
     plan = subscription.plan
     options = [
         PeriodOption(
@@ -376,7 +383,10 @@ def start_test_payment(user: NexUser, amount: int, return_url: str) -> str:
 @sync_to_async
 def start_renew_payment(user: NexUser, months: int, return_url: str) -> str:
     """Создать платёж за продление и вернуть ссылку на оплату."""
-    subscription = Subscription.objects.select_related("plan").get(user=user)
+    subscription = Subscription.objects.select_related("plan", "next_plan").get(user=user)
+    # То же, что и на экране: цена должна считаться по тарифу, который человек
+    # получит, а не по тому, с которого уходит.
+    subscription = service.ensure_current_plan(subscription)
     period = BillingPeriod.objects.get(months=months, is_active=True)
     created = payments.create_payment(
         user,
@@ -386,7 +396,7 @@ def start_renew_payment(user: NexUser, months: int, return_url: str) -> str:
         months=period.months,
         return_url=return_url,
     )
-    return created.url
+    return created.url, created.payment.pk
 
 
 @sync_to_async
@@ -456,3 +466,11 @@ def _sync_quietly(subscription: Subscription) -> None:
         panel_sync.sync_subscription(subscription)
     except RemnawaveError as exc:
         logger.warning("Не удалось сразу синхронизировать подписку %s: %s", subscription.pk, exc)
+
+
+@sync_to_async
+def remember_payment_screen(payment_uuid, message_id: int | None) -> None:
+    """Запомнить, какой экран правит вебхук после оплаты."""
+    if message_id is None:
+        return
+    Payment.objects.filter(pk=payment_uuid).update(screen_message_id=message_id)

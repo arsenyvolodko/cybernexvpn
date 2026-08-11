@@ -13,6 +13,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 from django.conf import settings
+from django.utils.timezone import localtime
 
 from bot import texts
 from bot.handlers.common import render
@@ -23,6 +24,7 @@ from bot.services import (
     get_plan_options,
     get_renew_options,
     receipt_needs_email,
+    remember_payment_screen,
     set_email,
     start_plan_change_payment,
     start_renew_payment,
@@ -60,14 +62,20 @@ async def handle_renew(call: CallbackQuery, user: NexUser) -> None:
         await render(call, texts.SUBSCRIPTION_NONE, keyboards.only_back())
         return
 
-    await render(
-        call,
-        texts.RENEW.format(
+    text = texts.RENEW.format(
+        plan=texts.plural_devices(subscription.plan.device_limit),
+        price=subscription.plan.price_month,
+    )
+    if subscription.next_plan_id:
+        text += texts.RENEW_PLAN_CHANGE_PENDING.format(
+            next_plan=texts.plural_devices(subscription.next_plan.device_limit),
+            next_price=subscription.next_plan.price_month,
+            until=localtime(subscription.expires_at).strftime("%d.%m.%Y"),
             plan=texts.plural_devices(subscription.plan.device_limit),
             price=subscription.plan.price_month,
-        ),
-        keyboards.renew(options),
-    )
+        )
+
+    await render(call, text, keyboards.renew(options))
 
 
 @router.callback_query(RenewCallback.filter())
@@ -83,12 +91,14 @@ async def handle_renew_period(
 async def _start_renew(event: CallbackQuery | Message, user: NexUser, months: int) -> None:
     """`event` может быть и нажатием, и сообщением с почтой — render разберётся."""
     try:
-        url = await start_renew_payment(user, months, settings.TG_BOT_URL)
+        url, payment_id = await start_renew_payment(user, months, settings.TG_BOT_URL)
     except Exception:
         logger.exception("Не удалось создать платёж за продление")
         await render(event, texts.PAYMENT_FAILED, keyboards.only_back())
         return
-    await render(event, texts.PAYMENT_READY, keyboards.pay(url))
+    message_id = await render(event, texts.PAYMENT_READY, keyboards.pay(url))
+    # Запоминаем экран, чтобы вебхук поправил именно его, когда деньги дойдут.
+    await remember_payment_screen(payment_id, message_id)
 
 
 # --- смена тарифа ---

@@ -26,7 +26,8 @@ class FakeResponse:
         self._status = status
 
     def json(self):
-        return {"status": self._status}
+        # captured_at — момент, когда ЮKassa зафиксировала оплату.
+        return {"status": self._status, "captured_at": "2026-08-11T17:54:00.000Z"}
 
 
 def make_payment(**kwargs):
@@ -126,7 +127,7 @@ def test_person_is_told_once_even_if_both_paths_run(monkeypatch):
     payment, _ = make_payment()
     patch_yookassa(monkeypatch)
     sent = []
-    monkeypatch.setattr("bot.notify.notify_payment_applied", lambda chat_id, text: sent.append(chat_id))
+    monkeypatch.setattr("bot.notify.notify_payment_applied", lambda chat_id, text, screen=None: sent.append(chat_id))
 
     reconcile.reconcile()
     reconcile.reconcile()  # второй прогон: платёж уже закрыт
@@ -138,7 +139,7 @@ def test_message_says_what_was_bought(monkeypatch):
     payment, subscription = make_payment()
     patch_yookassa(monkeypatch)
     sent = []
-    monkeypatch.setattr("bot.notify.notify_payment_applied", lambda chat_id, text: sent.append(text))
+    monkeypatch.setattr("bot.notify.notify_payment_applied", lambda chat_id, text, screen=None: sent.append(text))
 
     reconcile.reconcile()
 
@@ -152,7 +153,7 @@ def test_test_payment_grants_nothing_but_confirms(monkeypatch):
     before = subscription.expires_at
     patch_yookassa(monkeypatch)
     sent = []
-    monkeypatch.setattr("bot.notify.notify_payment_applied", lambda chat_id, text: sent.append(text))
+    monkeypatch.setattr("bot.notify.notify_payment_applied", lambda chat_id, text, screen=None: sent.append(text))
 
     reconcile.reconcile()
 
@@ -160,3 +161,82 @@ def test_test_payment_grants_nothing_but_confirms(monkeypatch):
     assert subscription.expires_at == before, "проверочный платёж не должен продлевать подписку"
     assert "Проверочный платёж" in sent[0]
     assert "опрос" in sent[0], "надо видеть, каким путём пришло подтверждение"
+
+
+def test_delay_is_measured_from_payment_not_from_link(monkeypatch):
+    """Замер обязан считать доставку, а не то, как долго человек вводил карту.
+
+    Первая версия считала от создания ссылки — и показала «82 с» там, где
+    вебхук пришёл за секунду.
+    """
+    from datetime import timedelta
+
+    payment, _ = make_payment(kind=PaymentKindEnum.TEST, amount=5)
+    # Ссылку создали давно, оплатили только что.
+    Payment.objects.filter(pk=payment.pk).update(created_at=now() - timedelta(minutes=30))
+    patch_yookassa(monkeypatch)
+    sent = []
+    monkeypatch.setattr("bot.notify.notify_payment_applied", lambda chat_id, text, screen=None: sent.append(text))
+    monkeypatch.setattr(
+        "nexvpn.subscription.reconcile.parse_paid_at", lambda remote: now() - timedelta(seconds=3)
+    )
+
+    reconcile.reconcile()
+
+    assert "3 с" in sent[0], sent[0]
+    assert "30" not in sent[0], "в задержку не должно попадать время до оплаты"
+
+
+def calls_of(monkeypatch):
+    """Перехватываем обращения к Bot API, не выходя в сеть."""
+    calls = []
+    monkeypatch.setattr("bot.notify._api", lambda method, payload: (calls.append((method, payload)), True)[1])
+    return calls
+
+
+def test_existing_screen_is_edited_not_duplicated(monkeypatch):
+    """Человек ушёл платить с экрана оплаты — туда же логично и вернуть ответ."""
+    from bot.notify import notify_payment_applied
+
+    calls = calls_of(monkeypatch)
+    notify_payment_applied(chat_id=1, text="ок", screen_message_id=555)
+
+    assert [m for m, _ in calls] == ["editMessageText"]
+    assert calls[0][1]["message_id"] == 555
+
+
+def test_new_message_when_the_screen_is_gone(monkeypatch):
+    """Экран могли удалить — ответ всё равно должен дойти, и с той же кнопкой."""
+    from bot import notify
+
+    calls = []
+
+    def fake_api(method, payload):
+        calls.append((method, payload))
+        return method != "editMessageText"  # правка не удалась
+
+    monkeypatch.setattr(notify, "_api", fake_api)
+    notify.notify_payment_applied(chat_id=1, text="ок", screen_message_id=555)
+
+    assert [m for m, _ in calls] == ["editMessageText", "sendMessage"]
+    assert calls[1][1]["reply_markup"] == calls[0][1]["reply_markup"], "кнопка одинаковая в обоих путях"
+
+
+def test_button_leads_to_its_own_handler(monkeypatch):
+    """Кнопка «Отлично» должна сниматься нашим обработчиком, а не заглушкой."""
+    from bot import notify
+    from bot.handlers.broadcast import router
+
+    calls = calls_of(monkeypatch)
+    notify.notify_payment_applied(chat_id=1, text="ок", screen_message_id=None)
+    markup = calls[0][1]["reply_markup"]
+    callback = markup["inline_keyboard"][0][0]["callback_data"]
+
+    assert callback == notify.PAYMENT_OK_CALLBACK
+    from types import SimpleNamespace
+
+    event = SimpleNamespace(data=callback)
+    assert any(
+        all(flt.callback(event) for flt in (h.filters or []))
+        for h in router.callback_query.handlers
+    )

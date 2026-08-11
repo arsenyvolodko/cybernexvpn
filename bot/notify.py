@@ -64,23 +64,35 @@ def notify_device_connected(chat_id: int, message_id: int, device_title: str) ->
     )
 
 
-def notify_payment_applied(chat_id: int, text: str) -> None:
+PAYMENT_OK_CALLBACK = "payment_ok"
+
+
+def _payment_ok_markup() -> dict:
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text="Отлично 👍", callback_data=PAYMENT_OK_CALLBACK, style="success"
+            )
+        ]]
+    )
+    return keyboard.model_dump(exclude_none=True)
+
+
+def notify_payment_applied(chat_id: int, text: str, screen_message_id: int | None = None) -> None:
     """Сказать человеку, что оплата прошла и дни начислены.
 
-    Отдельным сообщением, а не правкой экрана оплаты: между нажатием «оплатить»
-    и возвратом в бот человек успевает походить по меню, и неизвестно, что у
-    него сейчас на экране. Правка вслепую переписала бы что попало.
-
-    Вызывать только из `transaction.on_commit` той транзакции, что проставила
-    `processed_at`. Тогда сообщение уйдёт ровно один раз, кто бы ни начислил
-    первым — вебхук или сверка.
+    Правим тот самый экран «Всё готово к оплате», если он ещё цел: человек
+    оттуда и ушёл платить, туда же логично и вернуться. Не вышло — шлём новым
+    сообщением с той же кнопкой, чтобы поведение не зависело от того, удалось
+    ли попасть в старое сообщение.
     """
-    _api(
-        "sendMessage",
-        {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "reply_markup": keyboards.main_menu().model_dump(exclude_none=True),
-        },
-    )
+    payload = {"text": text, "parse_mode": "HTML", "reply_markup": _payment_ok_markup()}
+
+    if screen_message_id and _api(
+        "editMessageText", {"chat_id": chat_id, "message_id": screen_message_id, **payload}
+    ):
+        return
+
+    _api("sendMessage", {"chat_id": chat_id, **payload})

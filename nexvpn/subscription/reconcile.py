@@ -46,7 +46,7 @@ def pending_payments():
     )
 
 
-def _status_of(payment: Payment) -> str | None:
+def _fetch(payment: Payment) -> dict | None:
     try:
         response = requests.get(
             f"{API}/{payment.uuid}",
@@ -59,10 +59,20 @@ def _status_of(payment: Payment) -> str | None:
     if not response.ok:
         logger.warning("ЮKassa вернула %s по платежу %s", response.status_code, payment.uuid)
         return None
-    return response.json().get("status")
+    return response.json()
 
 
-def notify_paid(payment: Payment, subscription, *, source: str) -> None:
+def parse_paid_at(remote: dict | None):
+    """Когда ЮKassa зафиксировала оплату. По нему считаем задержку доставки."""
+    from django.utils.dateparse import parse_datetime
+
+    value = (remote or {}).get("captured_at")
+    if isinstance(value, str):
+        return parse_datetime(value)
+    return value
+
+
+def notify_paid(payment: Payment, subscription, *, source: str, paid_at=None) -> None:
     """Сообщить человеку, что оплата прошла.
 
     Живёт здесь, чтобы вебхук и сверка звали одно и то же: два похожих, но
@@ -81,12 +91,17 @@ def notify_paid(payment: Payment, subscription, *, source: str) -> None:
         return
 
     if payment.kind == PaymentKindEnum.TEST:
-        elapsed = (now() - payment.created_at).total_seconds()
+        # Считаем от момента оплаты в ЮKassa, а не от создания ссылки: иначе в
+        # «задержку доставки» попадёт время, пока человек вводил карту.
+        delay = (
+            f"{round((now() - paid_at).total_seconds())} с"
+            if paid_at
+            else "время оплаты неизвестно"
+        )
         notify_payment_applied(
             payment.user_id,
-            texts.TEST_PAYMENT_OK.format(
-                amount=payment.amount, source=source, seconds=round(elapsed)
-            ),
+            texts.TEST_PAYMENT_OK.format(amount=payment.amount, source=source, delay=delay),
+            payment.screen_message_id,
         )
         return
 
@@ -100,6 +115,7 @@ def notify_paid(payment: Payment, subscription, *, source: str) -> None:
             until=localtime(subscription.expires_at).strftime("%d.%m.%Y"),
             days_left=texts.plural_days(subscription.days_left),
         ),
+        payment.screen_message_id,
     )
 
 
@@ -110,11 +126,11 @@ def reconcile() -> ReconcileResult:
     result = ReconcileResult()
     for payment in pending_payments():
         result.checked += 1
-        status = _status_of(payment)
-        if status is None:
+        remote = _fetch(payment)
+        if remote is None:
             result.failed += 1
             continue
-        if status != "succeeded":
+        if remote.get("status") != "succeeded":
             result.still_pending += 1
             continue
 
@@ -132,7 +148,7 @@ def reconcile() -> ReconcileResult:
         logger.info("Добрали платёж %s на %s₽ для %s", locked.uuid, locked.amount, locked.user_id)
         if subscription is not None:
             panel_sync.sync_subscription(subscription)
-        notify_paid(locked, subscription, source="опрос")
+        notify_paid(locked, subscription, source="опрос", paid_at=parse_paid_at(remote))
 
     if result.applied or result.failed:
         logger.info(

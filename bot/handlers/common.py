@@ -40,32 +40,40 @@ async def render(
     *,
     force_new: bool = False,
     screen: str | None = None,
-) -> None:
-    """`screen` помечает экран для фоновых задач; любая другая отрисовка метку снимает."""
+) -> int | None:
+    """Отрисовать экран и вернуть id сообщения, в котором он оказался.
+
+    Id нужен тем, кто захочет поправить этот экран позже из другого процесса —
+    например, вебхуку оплаты. Возвращаем именно фактический: экран мог не
+    отредактироваться и уехать в новое сообщение.
+
+    `screen` помечает экран для фоновых задач; любая другая отрисовка метку снимает.
+    """
     if isinstance(event, Message):
         mark_screen(event.chat.id, screen)
-        await event.answer(text, reply_markup=keyboard)
-        return
+        sent = await event.answer(text, reply_markup=keyboard)
+        return sent.message_id
 
     message = event.message
     if message is None:
-        return
+        return None
     mark_screen(message.chat.id, screen)
 
     can_edit = not force_new and not (message.photo or message.document or message.video)
     if can_edit:
         try:
             await message.edit_text(text, reply_markup=keyboard)
-            return
+            return message.message_id
         except TelegramBadRequest as exc:
             if NOT_MODIFIED in str(exc):
                 # Человек нажал ту же кнопку второй раз — экран уже такой.
-                return
+                return message.message_id
             logger.debug("Не удалось отредактировать сообщение: %s", exc)
 
     # Сначала отправляем, потом сносим старое. Обратный порядок однажды стоил
     # нам пропавшего экрана: в тексте была битая разметка, правка не прошла,
     # сообщение удалилось, отправка упала на той же разметке — и у человека
     # осталась пустота вместо меню. Пусть лучше мелькнёт дубль.
-    await message.answer(text, reply_markup=keyboard)
+    sent = await message.answer(text, reply_markup=keyboard)
     await try_delete(message)
+    return sent.message_id

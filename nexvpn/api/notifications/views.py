@@ -72,7 +72,12 @@ def handle_notification(request: Request) -> Response:
         # Панель дёргаем уже после коммита: её недоступность не должна откатывать оплату.
         panel_sync.sync_subscription(subscription)
     # Сообщение — тем же кодом, что и у сверки: событие одно, текст должен быть один.
-    reconcile.notify_paid(payment, subscription, source="вебхук")
+    reconcile.notify_paid(
+        payment,
+        subscription,
+        source="вебхук",
+        paid_at=reconcile.parse_paid_at({"captured_at": getattr(webhook.object, "captured_at", None)}),
+    )
 
     return Response(status=200)
 

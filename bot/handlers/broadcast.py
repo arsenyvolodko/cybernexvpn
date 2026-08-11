@@ -13,6 +13,7 @@ from aiogram.types import CallbackQuery
 
 from bot import texts
 from bot.broadcast import CONNECT_CALLBACK, MENU_CALLBACK
+from bot.notify import PAYMENT_OK_CALLBACK
 from bot.handlers.connect import connect_screen
 from bot.keyboards import keyboards
 from bot.screen_state import mark_screen
@@ -48,5 +49,17 @@ async def handle_connect_from_broadcast(call: CallbackQuery, user: NexUser) -> N
 
 @router.callback_query(F.data == MENU_CALLBACK)
 async def handle_menu_from_broadcast(call: CallbackQuery) -> None:
+    await call.answer()
+    await _reply_with_screen(call, texts.MAIN_MENU, keyboards.main_menu())
+
+
+@router.callback_query(F.data == PAYMENT_OK_CALLBACK)
+async def handle_payment_ok(call: CallbackQuery) -> None:
+    """«Отлично» под сообщением об оплате.
+
+    Ведёт себя как кнопки объявлений: снимает клавиатуру с сообщения об оплате
+    и присылает меню отдельным сообщением. Само сообщение об оплате не трогаем —
+    это чек, к нему человек может вернуться.
+    """
     await call.answer()
     await _reply_with_screen(call, texts.MAIN_MENU, keyboards.main_menu())

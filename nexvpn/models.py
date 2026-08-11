@@ -393,6 +393,9 @@ class Payment(models.Model):
     period_months = models.PositiveSmallIntegerField(default=1, help_text="Сколько месяцев оплачено")
     # Ставится ровно один раз: YooKassa шлёт вебхук повторно, пока не получит 200.
     processed_at = models.DateTimeField(null=True, blank=True, default=None)
+    # Экран «Всё готово к оплате»: его правит вебхук, когда деньги дошли.
+    # Живёт здесь, потому что правит другой процесс — бот об этом не знает.
+    screen_message_id = models.BigIntegerField(null=True, blank=True, default=None)
 
     def __str__(self):
         return f"{self.uuid} — {self.amount}₽"
