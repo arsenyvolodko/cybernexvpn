@@ -47,7 +47,23 @@ def send_subscription_reminders():
 
 @shared_task()
 def sync_panel():
-    """Догнать подписки, которые не доехали до Remnawave."""
+    """Догнать подписки, которые не доехали до Remnawave.
+
+    При DEBUG=True не делаем ничего. Причина не теоретическая: локальный `.env`
+    смотрит на боевую панель, и запущенный на машине разработчика celery-beat
+    начинает раз в пять минут переписывать боевым пользователям сроки
+    значениями из дев-базы. Такую же защиту носит команда `sync_panel`, но
+    задача про неё не знала — а именно задача крутится по расписанию.
+    """
+    from django.conf import settings
+
+    if settings.DEBUG:
+        logger.warning(
+            "DEBUG=True — пропускаю синхронизацию: панель в .env боевая (%s)",
+            settings.PANEL_API_URL,
+        )
+        return {"skipped": True}
+
     ok, failed = panel_sync.sync_pending()
     if ok or failed:
         logger.info("Синхронизация с панелью: успешно %s, с ошибкой %s", ok, failed)

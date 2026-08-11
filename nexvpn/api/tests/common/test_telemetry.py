@@ -212,3 +212,22 @@ def test_admin_bulk_delete_also_reaches_the_panel(admin_client, monkeypatch):
 
     assert not NexUser.objects.filter(pk=subscription.user_id).exists()
     assert deleted == [7]
+
+
+def test_scheduled_sync_refuses_to_run_from_a_dev_machine(settings, monkeypatch):
+    """Локальный beat однажды начал переписывать боевой панели сроки из дев-базы.
+
+    Команду `sync_panel` мы защитили сразу, а периодическую задачу — нет, хотя
+    по расписанию крутится именно она.
+    """
+    from nexvpn import tasks
+
+    settings.DEBUG = True
+    called = []
+    monkeypatch.setattr(
+        "nexvpn.subscription.panel_sync.sync_pending",
+        lambda *a, **kw: called.append(True) or (0, 0),
+    )
+
+    assert tasks.sync_panel() == {"skipped": True}
+    assert not called
