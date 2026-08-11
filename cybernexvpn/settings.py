@@ -283,6 +283,11 @@ TG_BOT_TOKEN = env.str("TG_BOT_TOKEN", "")
 # роняет каст, и Django не стартует вовсе.
 TG_ADMIN_USER_ID = int(env.str("TG_ADMIN_USER_ID", "") or 0)
 SUPPORT_CONTACT = env.str("SUPPORT_CONTACT", "@cybernexvpn")
+# Канал, на который просим подписаться новичка. Пустое имя выключает проверку
+# целиком — например, если бота выведут из администраторов канала и запрашивать
+# участников станет нечем.
+TG_CHANNEL_USERNAME = env.str("TG_CHANNEL_USERNAME", "@cybernexvpn")
+TG_CHANNEL_URL = env.str("TG_CHANNEL_URL", "https://t.me/cybernexvpn")
 # Страница-мостик: Telegram не пускает в inline-кнопки схемы вроде happ://,
 # поэтому нужна https-страница, которая покажет кнопку с этой схемой.
 # Пусто — ведём на штатную страницу подписки Remnawave.

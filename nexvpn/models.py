@@ -36,6 +36,9 @@ class NexUser(models.Model):
     is_legacy = models.BooleanField(default=False)
     # Первый заход в бот новой версии. None = ещё не заходил.
     activated_at = models.DateTimeField(null=True, blank=True, default=None)
+    # Подписался на канал. Спрашиваем только у новичков: у легаси доступ уже
+    # оплачен, и ставить им условие задним числом было бы нечестно.
+    joined_channel = models.BooleanField(default=False)
 
     @property
     def is_activated(self) -> bool:
