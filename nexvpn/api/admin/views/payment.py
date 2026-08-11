@@ -1,15 +1,12 @@
 import logging
 import tempfile
 
-import yookassa
-from django.db import transaction
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils.timezone import now
 from drf_spectacular.utils import extend_schema
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
-from yookassa.domain.response import PaymentResponse
 
 from nexvpn import permissions, payments
 from nexvpn.api.admin.serializers.payment_serializers import (
@@ -17,8 +14,8 @@ from nexvpn.api.admin.serializers.payment_serializers import (
     PaymentResponseSerializer,
 )
 from nexvpn.api.exceptions.enums.error_message_enum import ErrorMessageEnum
-from nexvpn.enums import PaymentKindEnum, TransactionStatusEnum, TransactionTypeEnum
-from nexvpn.models import GlobalSettings, NexUser, Payment, Plan, SubscriptionEvent, Transaction
+from nexvpn.enums import PaymentKindEnum
+from nexvpn.models import GlobalSettings, NexUser, Plan, SubscriptionEvent, Transaction
 from nexvpn.permissions import check_ownership
 from nexvpn.subscription import pricing, service
 
@@ -71,49 +68,19 @@ def create_payment(request, user_id: int) -> Response:
     if amount <= 0:
         return Response({"error_message": "Оплата не требуется."}, status=400)
 
-    purpose = payments.PaymentPurpose(
-        amount=amount, plan=plan, days=days, is_plan_change=(kind == PaymentKindEnum.PLAN_CHANGE),
-    )
-    payment_data = payments.build_payment_data(
-        purpose, email=user.email, return_url=return_url, billing=billing,
-    )
-
     try:
-        with transaction.atomic():
-            idempotence_key = payments.new_idempotence_key()
-            yookassa_payment: PaymentResponse = yookassa.Payment.create(payment_data, idempotence_key)
-            if yookassa_payment.status != "pending":
-                raise RuntimeError(f"Неожиданный статус платежа: {yookassa_payment.status}")
-
-            payment = Payment.objects.create(
-                uuid=yookassa_payment.id,
-                idempotence_key=idempotence_key,
-                user=user,
-                kind=kind,
-                plan=plan,
-                amount=amount,
-            )
-            Transaction.objects.create(
-                user=user,
-                is_credit=True,
-                value=amount,
-                payment=payment,
-                type=(
-                    TransactionTypeEnum.PLAN_UPGRADE
-                    if kind == PaymentKindEnum.PLAN_CHANGE
-                    else TransactionTypeEnum.PURCHASE_SUBSCRIPTION
-                ),
-                status=TransactionStatusEnum.WAITING_FOR_CAPTURE,
-            )
+        created = payments.create_payment(
+            user, plan, amount=amount, days=days, kind=kind, return_url=return_url,
+        )
     except Exception as exc:
         logger.error("Не удалось создать платёж в YooKassa: %s", exc, exc_info=True)
         return Response({"error_message": "Не получилось создать платёж, попробуйте позже."}, status=400)
 
     response_serializer = PaymentResponseSerializer(
         data={
-            "url": yookassa_payment.confirmation.confirmation_url,
-            "amount": amount,
-            "payment_id": str(payment.uuid),
+            "url": created.url,
+            "amount": created.amount,
+            "payment_id": str(created.payment.uuid),
         }
     )
     response_serializer.is_valid(raise_exception=True)

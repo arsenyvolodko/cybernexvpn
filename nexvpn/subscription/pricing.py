@@ -103,6 +103,14 @@ def quote_plan_change(days_left: int, price_from: int, price_to: int) -> PlanCha
     )
 
 
+def period_price(price_month: int, months: int, discount_percent: int) -> int:
+    """Цена за несколько месяцев со скидкой. Округление вниз — в пользу человека."""
+    if months <= 0:
+        raise ValueError("months must be positive")
+    discount_percent = max(0, min(100, discount_percent))
+    return price_month * months * (100 - discount_percent) // 100
+
+
 def plan_for_device_count(device_count: int, available_limits: list[int]) -> int:
     """Ближайший тариф, вмещающий `device_count` устройств.
 

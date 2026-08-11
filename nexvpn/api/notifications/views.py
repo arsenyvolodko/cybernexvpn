@@ -11,6 +11,7 @@ from yookassa.domain.notification import WebhookNotification
 from nexvpn.enums import PaymentKindEnum, PaymentStatusEnum, TransactionStatusEnum
 from nexvpn.models import Payment, Transaction
 from nexvpn.subscription import panel_sync, service
+from nexvpn.webhook_ips import verify_webhook_source
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +25,15 @@ def handle_notification(request: Request) -> Response:
     Почти всегда отвечаем 200, даже на мусор: иначе YooKassa будет слать
     повторы сутки. Реальная защита от двойного начисления — `processed_at`.
     """
+    allowed, source_ip = verify_webhook_source(request)
+    if not allowed:
+        # Не 200: это не YooKassa, и повторов от неё ждать незачем.
+        return Response(status=403)
+
     try:
         webhook = WebhookNotification(json.loads(request.body))
     except Exception as exc:
-        logger.error("Не удалось разобрать вебхук: %s", exc)
+        logger.error("Не удалось разобрать вебхук с %s: %s", source_ip, exc)
         return Response(status=400)
 
     if not (webhook.type == EXPECTED_WEBHOOK_TYPE and webhook.event in PaymentStatusEnum.values):
@@ -88,4 +94,5 @@ def _apply_payment(payment: Payment):
         plan=payment.plan,
         amount=payment.amount or 0,
         payment=payment,
+        months=payment.period_months or 1,
     )

@@ -147,6 +147,31 @@ class RemnawaveClient:
     def delete_device(self, user_id: int, hwid: str) -> None:
         self._request("POST", "/api/hwid/devices/delete", {"userId": user_id, "hwid": hwid})
 
+    # --- телеметрия ----------------------------------------------------
+
+    def iter_users(self, page_size: int = 250) -> list[dict[str, Any]]:
+        """Все пользователи панели со счётчиками трафика.
+
+        Нужна целиком, а не по одному: снимок делается разом по всем, иначе
+        триста запросов на каждый прогон.
+        """
+        users: list[dict[str, Any]] = []
+        start = 0
+        while True:
+            response = self._request("GET", f"/api/users?size={page_size}&start={start}") or {}
+            batch = response.get("users", [])
+            users.extend(batch)
+            # total панель отдаёт не всегда, поэтому останавливаемся по длине.
+            if len(batch) < page_size:
+                return users
+            start += page_size
+
+    def list_nodes(self) -> list[dict[str, Any]]:
+        response = self._request("GET", "/api/nodes")
+        if isinstance(response, list):
+            return response
+        return (response or {}).get("nodes", [])
+
     # --- squad'ы -------------------------------------------------------
 
     def list_internal_squads(self) -> list[dict[str, Any]]:

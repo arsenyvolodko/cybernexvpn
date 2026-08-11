@@ -10,10 +10,19 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.db import transaction
+from django.utils import timezone
 from django.utils.timezone import now
 
 from nexvpn.enums import PanelSyncStatusEnum, SubscriptionEventReasonEnum
-from nexvpn.models import NexUser, Payment, Plan, Subscription, SubscriptionEvent, UserInvitation
+from nexvpn.models import (
+    NexUser,
+    Payment,
+    Plan,
+    SentReminder,
+    Subscription,
+    SubscriptionEvent,
+    UserInvitation,
+)
 from nexvpn.subscription import pricing
 
 logger = logging.getLogger(__name__)
@@ -21,6 +30,22 @@ logger = logging.getLogger(__name__)
 
 class SubscriptionError(Exception):
     """Операция над подпиской невозможна в текущем состоянии."""
+
+
+def normalize_expiry(moment):
+    """Округлить окончание подписки вверх до фиксированного часа.
+
+    Без этого подписка кончается в тот же час суток, когда её оплатили, — и
+    напоминание «за час» может прилететь в четыре утра. Округляем **вверх**:
+    человек получит несколько часов сверху, но не потеряет ни минуты.
+    """
+    local = timezone.localtime(moment)
+    target = local.replace(
+        hour=settings.SUBSCRIPTION_EXPIRY_HOUR, minute=0, second=0, microsecond=0
+    )
+    if target < local:
+        target += timedelta(days=1)
+    return target
 
 
 def get_plan(device_limit: int) -> Plan:
@@ -66,9 +91,12 @@ def grant_days(
         plan = subscription.plan
 
     base = max(now(), subscription.expires_at)
-    subscription.expires_at = base + timedelta(days=days)
+    subscription.expires_at = normalize_expiry(base + timedelta(days=days))
     subscription.panel_status = PanelSyncStatusEnum.PENDING
     subscription.save()
+
+    # Период сдвинулся — напоминания по нему надо слать заново.
+    SentReminder.objects.filter(subscription=subscription).delete()
 
     SubscriptionEvent.objects.create(
         user=user,
@@ -111,8 +139,9 @@ def purchase_period(
     plan: Plan,
     amount: int,
     payment: Payment | None = None,
+    months: int = 1,
 ) -> Subscription:
-    """Оплаченный период (30 дней) на тарифе `plan`.
+    """Оплаченный срок на тарифе `plan`: `months` × 30 дней.
 
     Если подписка истекла и был запланирован переход на меньший тариф — он
     считается состоявшимся ровно здесь: новый период начинается уже на нём.
@@ -136,11 +165,12 @@ def purchase_period(
 
     subscription = grant_days(
         user,
-        days=pricing.days_in_period(),
+        days=pricing.days_in_period() * months,
         reason=SubscriptionEventReasonEnum.PURCHASE,
         plan=plan if subscription is None else None,
         amount=amount,
         payment=payment,
+        comment=f"{months} мес." if months > 1 else "",
     )
     grant_referral_rewards_if_first_payment(user)
     return subscription
@@ -196,9 +226,10 @@ def change_plan_now(
     expires_before = subscription.expires_at
     subscription.plan = new_plan
     subscription.next_plan = None
-    subscription.expires_at = now() + timedelta(days=converted_days)
+    subscription.expires_at = normalize_expiry(now() + timedelta(days=converted_days))
     subscription.panel_status = PanelSyncStatusEnum.PENDING
     subscription.save()
+    SentReminder.objects.filter(subscription=subscription).delete()
 
     is_upgrade = new_plan.price_month > old_plan.price_month
     SubscriptionEvent.objects.create(

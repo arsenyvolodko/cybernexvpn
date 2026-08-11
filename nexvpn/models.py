@@ -7,6 +7,8 @@ from django.db import models
 from django.utils.timezone import now
 
 from nexvpn.enums import (
+    BroadcastAudienceEnum,
+    BroadcastStatusEnum,
     PanelSyncStatusEnum,
     PaymentKindEnum,
     PaymentModeEnum,
@@ -83,6 +85,44 @@ class Plan(models.Model):
         return f"{self.name} — {self.device_limit} устр., {self.price_month}₽/мес"
 
 
+class BillingPeriod(models.Model):
+    """Срок оплаты и скидка за него.
+
+    Скидка общая для всех тарифов, а не своя цена на каждую пару «тариф × срок»:
+    пяти тарифов и четырёх сроков хватило бы на двадцать строк, которые надо
+    держать в согласии руками. Здесь строк четыре, а цена считается.
+    """
+
+    months = models.PositiveSmallIntegerField(unique=True, verbose_name="Месяцев")
+    discount_percent = models.PositiveSmallIntegerField(default=0, verbose_name="Скидка, %")
+    is_active = models.BooleanField(default=True)
+    order = models.IntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "months"]
+        verbose_name = "Срок оплаты"
+        verbose_name_plural = "Сроки оплаты"
+
+    @property
+    def days(self) -> int:
+        return self.months * settings.DAYS_IN_PERIOD
+
+    def price_for(self, plan: "Plan") -> int:
+        from nexvpn.subscription import pricing
+
+        return pricing.period_price(plan.price_month, self.months, self.discount_percent)
+
+    def full_price_for(self, plan: "Plan") -> int:
+        return plan.price_month * self.months
+
+    def saving_for(self, plan: "Plan") -> int:
+        return self.full_price_for(plan) - self.price_for(plan)
+
+    def __str__(self):
+        suffix = f", −{self.discount_percent}%" if self.discount_percent else ""
+        return f"{self.months} мес.{suffix}"
+
+
 class Subscription(models.Model):
     """Одна подписка на пользователя: тариф + дата окончания. Устройства живут в Remnawave."""
 
@@ -139,6 +179,53 @@ class Subscription(models.Model):
 
     def __str__(self):
         return f"{self.user}: {self.plan.device_limit} устр. до {self.expires_at:%d.%m.%Y}"
+
+
+class SentReminder(models.Model):
+    """Какие напоминания об окончании подписки уже отправлены.
+
+    Нужна, чтобы человек не получил одно и то же дважды: задача крутится часто,
+    а окно «осталось меньше N часов» держится долго. При продлении подписки
+    записи сбрасываются — начинается новый период, значит и напоминать по нему
+    надо заново.
+    """
+
+    subscription = models.ForeignKey(Subscription, on_delete=models.CASCADE, related_name="reminders")
+    hours_before = models.PositiveIntegerField()
+    expires_at = models.DateTimeField(help_text="На какую дату окончания было напоминание")
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["subscription", "hours_before"], name="unique_reminder_per_subscription"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.subscription_id}: за {self.hours_before} ч."
+
+
+class DeviceConnectionWatch(models.Model):
+    """Ожидание, что человек прямо сейчас подключает устройство.
+
+    Экран «Добавить подписку» показан, и мы ждём появления нового HWID, чтобы
+    переписать сообщение на «Готово». Ждут двое: фоновая задача бота (опрос
+    панели) и вебхук `user_hwid_devices.added`. Строка здесь — общий замок:
+    кто первым её удалил, тот и отправляет сообщение. Без этого человек получил
+    бы два уведомления об одном событии.
+
+    Живёт в БД, а не в памяти бота, именно чтобы её видел и веб-процесс.
+    """
+
+    user = models.OneToOneField(NexUser, on_delete=models.CASCADE, related_name="connection_watch")
+    chat_id = models.BigIntegerField()
+    message_id = models.BigIntegerField()
+    known_hwids = models.JSONField(default=list, help_text="Устройства, которые уже были до нажатия")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user_id}: ждём устройство с {self.created_at:%H:%M}"
 
 
 class SubscriptionEvent(models.Model):
@@ -215,11 +302,19 @@ class GlobalSettings(models.Model):
         default="Ведём технические работы, сервис скоро вернётся. Подписка идёт, "
                 "ничего не потеряется.",
         verbose_name="Текст заглушки",
+        help_text="Показывается всплывающим окном при нажатии кнопок, поэтому без HTML-разметки и не длиннее ~200 символов — Telegram обрежет.",
     )
     maintenance_until = models.DateTimeField(
         null=True, blank=True, default=None,
         verbose_name="Ориентировочно до",
         help_text="Необязательно. Если указать, бот сможет назвать срок в заглушке.",
+    )
+    maintenance_affects_admin = models.BooleanField(
+        default=False,
+        verbose_name="Заглушка и для админа",
+        help_text="По умолчанию администратор (TG_ADMIN_USER_ID) продолжает пользоваться ботом "
+                  "во время техработ — чтобы было чем проверить, что всё починилось. "
+                  "Включите, если нужно посмотреть на заглушку своими глазами.",
     )
 
     # --- чек 54-ФЗ ---
@@ -292,6 +387,7 @@ class Payment(models.Model):
     kind = models.CharField(max_length=31, choices=PaymentKindEnum.choices, null=True, blank=True, default=None)
     plan = models.ForeignKey(Plan, on_delete=models.PROTECT, null=True, blank=True, default=None)
     amount = models.PositiveIntegerField(null=True, blank=True, default=None)
+    period_months = models.PositiveSmallIntegerField(default=1, help_text="Сколько месяцев оплачено")
     # Ставится ровно один раз: YooKassa шлёт вебхук повторно, пока не получит 200.
     processed_at = models.DateTimeField(null=True, blank=True, default=None)
 
@@ -357,3 +453,142 @@ class Transaction(models.Model):
         credit_type = "Пополнение" if self.is_credit else "Списание"
         status, type_ = self.get_status_display(), self.get_type_display()
         return f"{timestamp}: {credit_type} в размере {self.value}₽ - [{status}] - {type_}."
+
+
+class PanelPresence(models.Model):
+    """Последнее известное состояние пользователя в панели.
+
+    Одна строка на человека, перезаписывается. Панель хранит только «последнее»
+    значение и историю не отдаёт — поэтому историю копим мы сами, а здесь
+    держим точку отсчёта, чтобы считать прирост трафика между снимками.
+    """
+
+    user = models.OneToOneField(NexUser, on_delete=models.CASCADE, related_name="presence")
+    online_at = models.DateTimeField(null=True, blank=True)
+    first_connected_at = models.DateTimeField(null=True, blank=True)
+    node_name = models.CharField(max_length=63, blank=True, default="")
+    used_traffic = models.BigIntegerField(default=0)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "присутствие в панели"
+        verbose_name_plural = "присутствие в панели"
+
+    def __str__(self):
+        return f"{self.user_id}: {self.node_name or 'нет ноды'}"
+
+
+class NodeUsageDay(models.Model):
+    """Сколько человек прокачал через конкретную ноду за сутки.
+
+    Прирост трафика приписывается той ноде, на которой человек был в момент
+    снимка. При шаге в десять минут это достаточно точно: ошибиться можно
+    только на тот трафик, что прошёл после смены ноды внутри одного интервала.
+
+    Разбивки по инбаундам, то есть по конкретным туннелям, панель не отдаёт —
+    видно только ноду. На eu1 и ru1 у нас по три профиля, так что до
+    «какой именно туннель» нужна статистика с самих нод.
+    """
+
+    user = models.ForeignKey(NexUser, on_delete=models.CASCADE, related_name="node_usage")
+    node_name = models.CharField(max_length=63)
+    date = models.DateField()
+    bytes = models.BigIntegerField(default=0)
+    # Сколько снимков застали человека на этой ноде — грубая мера «сколько сидел».
+    samples = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        verbose_name = "трафик по ноде за день"
+        verbose_name_plural = "трафик по нодам"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "node_name", "date"], name="unique_user_node_day"
+            )
+        ]
+        indexes = [models.Index(fields=["date", "node_name"])]
+
+    def __str__(self):
+        return f"{self.date} {self.node_name}: {self.bytes} Б"
+
+
+class UsageDashboard(NodeUsageDay):
+    """Только ради страницы в админке — своей таблицы не заводит."""
+
+    class Meta:
+        proxy = True
+        verbose_name = "использование туннелей"
+        verbose_name_plural = "Использование туннелей"
+
+
+class Broadcast(models.Model):
+    """Сообщение всем или отдельной группе, отправляемое из админки.
+
+    Текст пишется с разметкой Telegram (HTML): <b>, <i>, <a href>, <code>.
+    Отправка идёт через celery, потому что запрос админки не должен ждать
+    несколько сотен сообщений — и потому что при обрыве соединения рассылка
+    не должна останавливаться на полпути.
+    """
+
+    title = models.CharField(max_length=120, help_text="Для себя, людям не показывается")
+    text = models.TextField(help_text="Разметка Telegram: <b>жирный</b>, <i>курсив</i>, <a href='…'>ссылка</a>")
+    audience = models.CharField(
+        max_length=31,
+        choices=BroadcastAudienceEnum.choices,
+        default=BroadcastAudienceEnum.ALL,
+    )
+    with_connect_button = models.BooleanField(
+        default=False,
+        verbose_name="Кнопка «Подключиться бесплатно»",
+        help_text="Ведёт в тот же экран подключения, что и кнопка в меню",
+    )
+    with_menu_button = models.BooleanField(
+        default=False,
+        verbose_name="Кнопка «В меню»",
+        help_text="Обе кнопки не правят объявление: снимают с него клавиатуру и присылают экран новым сообщением",
+    )
+    status = models.CharField(
+        max_length=15, choices=BroadcastStatusEnum.choices, default=BroadcastStatusEnum.DRAFT
+    )
+    test_only = models.BooleanField(
+        default=False,
+        verbose_name="Только администратору",
+        help_text="Проверочная отправка на TG_ADMIN_USER_ID, остальных не трогаем",
+    )
+    sent_count = models.PositiveIntegerField(default=0)
+    failed_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "рассылка"
+        verbose_name_plural = "Рассылки"
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"{self.title} ({self.get_status_display()})"
+
+
+class BroadcastDelivery(models.Model):
+    """Результат по каждому получателю.
+
+    Нужен, чтобы одна ошибка не превращалась в «рассылка не дошла»: видно
+    поимённо, кто получил, а кто нет и почему. Заодно защищает от повторной
+    отправки, если задачу перезапустили.
+    """
+
+    broadcast = models.ForeignKey(Broadcast, on_delete=models.CASCADE, related_name="deliveries")
+    user = models.ForeignKey(NexUser, on_delete=models.CASCADE)
+    is_delivered = models.BooleanField()
+    error = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "доставка рассылки"
+        verbose_name_plural = "Доставки рассылок"
+        constraints = [
+            models.UniqueConstraint(fields=["broadcast", "user"], name="unique_broadcast_delivery")
+        ]
+
+    def __str__(self):
+        return f"{self.user_id}: {'доставлено' if self.is_delivered else self.error}"

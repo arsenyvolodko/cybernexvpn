@@ -5,12 +5,23 @@ from datetime import timedelta
 import pytest
 from django.utils.timezone import now
 
+from django.conf import settings
+
 from nexvpn.enums import SubscriptionEventReasonEnum
 from nexvpn.models import Plan, Subscription, SubscriptionEvent, UserInvitation
 from nexvpn.api.tests.factories import NexUserFactory, PlanFactory, SubscriptionFactory
 from nexvpn.subscription import service
 
 pytestmark = pytest.mark.django_db
+
+
+def expiry_after(days: int, *, base=None):
+    """Ожидаемая дата окончания с учётом округления вверх до фиксированного часа.
+
+    Проверять голое `days_left` нельзя: в зависимости от времени суток оно
+    получится N или N+1. Сама дата — величина детерминированная.
+    """
+    return service.normalize_expiry((base or now()) + timedelta(days=days))
 
 
 @pytest.fixture
@@ -28,7 +39,7 @@ def test_trial_for_new_user(plans):
 
     assert subscription is not None
     assert subscription.plan.device_limit == 3
-    assert subscription.days_left == 3
+    assert subscription.expires_at == expiry_after(settings.TRIAL_DAYS)
     assert SubscriptionEvent.objects.get(user=user).reason == SubscriptionEventReasonEnum.TRIAL
 
 
@@ -49,12 +60,14 @@ def test_trial_is_not_granted_twice(plans):
 
 
 def test_grant_days_extends_active_subscription(plans):
-    subscription = SubscriptionFactory(plan=plans[3], expires_at=now() + timedelta(days=10))
+    starts_at = now() + timedelta(days=10)
+    subscription = SubscriptionFactory(plan=plans[3], expires_at=starts_at)
 
     service.grant_days(subscription.user, 5, SubscriptionEventReasonEnum.ADMIN_ADJUSTMENT)
 
     subscription.refresh_from_db()
-    assert subscription.days_left == 15
+    # Дни добавляются в хвост текущего периода, а не с сегодняшнего дня.
+    assert subscription.expires_at == expiry_after(5, base=starts_at)
 
 
 def test_grant_days_restarts_expired_subscription(plans):
@@ -64,7 +77,7 @@ def test_grant_days_restarts_expired_subscription(plans):
     service.grant_days(subscription.user, 10, SubscriptionEventReasonEnum.ADMIN_ADJUSTMENT)
 
     subscription.refresh_from_db()
-    assert subscription.days_left == 10
+    assert subscription.expires_at == expiry_after(10)
 
 
 def test_upgrade_converts_remainder(plans):
@@ -74,7 +87,7 @@ def test_upgrade_converts_remainder(plans):
 
     subscription.refresh_from_db()
     assert subscription.plan == plans[3]
-    assert subscription.days_left == 11  # 30 дн. × 150₽ / 400₽
+    assert subscription.expires_at == expiry_after(11)  # 30 дн. × 150₽ / 400₽
 
 
 def test_upgrade_with_topup_gives_full_period(plans):
@@ -83,7 +96,7 @@ def test_upgrade_with_topup_gives_full_period(plans):
     service.change_plan_now(subscription.user, plans[3], amount_paid=250)
 
     subscription.refresh_from_db()
-    assert subscription.days_left == 30
+    assert subscription.expires_at == expiry_after(30)
 
 
 def test_upgrade_rejects_underpayment(plans):
@@ -140,7 +153,7 @@ def test_purchase_extends_and_clears_scheduled_downgrade(plans):
     subscription.refresh_from_db()
     assert subscription.plan == plans[1]
     assert subscription.next_plan is None
-    assert subscription.days_left == 30
+    assert subscription.expires_at == expiry_after(30)
 
 
 def test_referral_rewards_only_after_first_payment(plans):
@@ -152,14 +165,17 @@ def test_referral_rewards_only_after_first_payment(plans):
     service.register_invitation(inviter, invitee)
 
     inviter.subscription.refresh_from_db()
+    inviter_before = inviter.subscription.expires_at
+    invitee_before = invitee.subscription.expires_at
     assert inviter.subscription.days_left == 10  # пока ничего не начислено
 
     service.purchase_period(invitee, plans[3], amount=400)
 
     inviter.subscription.refresh_from_db()
     invitee.subscription.refresh_from_db()
-    assert inviter.subscription.days_left == 20  # 10 + бонус 10
-    assert invitee.subscription.days_left == 43  # 3 + 30 оплаченных + 10 бонусных
+    assert inviter.subscription.expires_at == expiry_after(10, base=inviter_before)
+    # 30 оплаченных + 10 бонусных поверх остатка
+    assert invitee.subscription.expires_at == expiry_after(40, base=invitee_before)
     assert UserInvitation.objects.get(invitee=invitee).reward_granted_at is not None
 
 
@@ -170,11 +186,14 @@ def test_referral_rewards_granted_once(plans):
     SubscriptionFactory(user=invitee, plan=plans[3], expires_at=now() + timedelta(days=3))
     service.register_invitation(inviter, invitee)
 
+    inviter_before = inviter.subscription.expires_at
+
     service.purchase_period(invitee, plans[3], amount=400)
     service.purchase_period(invitee, plans[3], amount=400)
 
     inviter.subscription.refresh_from_db()
-    assert inviter.subscription.days_left == 20  # второй раз бонус не пришёл
+    # Бонус ровно один, несмотря на две оплаты приглашённого.
+    assert inviter.subscription.expires_at == expiry_after(10, base=inviter_before)
 
 
 def test_self_referral_rejected(plans):

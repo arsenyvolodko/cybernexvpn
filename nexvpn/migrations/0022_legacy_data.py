@@ -17,6 +17,7 @@ from datetime import date, datetime, timedelta, timezone
 from django.conf import settings
 from django.db import migrations
 
+
 def seed_plans(apps, schema_editor):
     from nexvpn.subscription.plans import DEFAULT_PLANS
 
@@ -30,6 +31,7 @@ def seed_plans(apps, schema_editor):
 
 def migrate_legacy_users(apps, schema_editor):
     from nexvpn.subscription import legacy
+    from nexvpn.subscription.service import normalize_expiry
 
     NexUser = apps.get_model("nexvpn", "NexUser")
     Plan = apps.get_model("nexvpn", "Plan")
@@ -57,7 +59,10 @@ def migrate_legacy_users(apps, schema_editor):
         subscription = Subscription.objects.create(
             user_id=conversion.user_id,
             plan=plan,
-            expires_at=now + timedelta(days=conversion.days_granted),
+            # Округляем до того же часа, что и обычные начисления: иначе у всех
+            # перенесённых подписка кончалась бы в момент деплоя, и напоминания
+            # прилетали бы ночью, если выкатывались ночью.
+            expires_at=normalize_expiry(now + timedelta(days=conversion.days_granted)),
             panel_status="pending",
         )
 

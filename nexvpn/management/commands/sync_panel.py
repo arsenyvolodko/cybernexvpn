@@ -8,9 +8,15 @@
     python manage.py sync_panel            # только то, что не синхронизировано
     python manage.py sync_panel --all      # переписать состояние всех подписок
     python manage.py sync_panel --dry-run  # показать, что было бы отправлено
+
+С DEBUG=True команда откажется работать. Причина не теоретическая: локальный
+`.env` смотрит на боевую панель, и один запуск с дев-базы залил туда 269
+пользователей с чужими датами. Единичные операции ботом при отладке нужны и
+разрешены, а вот массовая заливка с машины разработчика — никогда.
 """
 
-from django.core.management.base import BaseCommand
+from django.conf import settings
+from django.core.management.base import BaseCommand, CommandError
 
 from nexvpn.enums import PanelSyncStatusEnum
 from nexvpn.models import Subscription
@@ -25,8 +31,22 @@ class Command(BaseCommand):
         parser.add_argument("--all", action="store_true", help="Включая уже синхронизированные")
         parser.add_argument("--dry-run", action="store_true", help="Ничего не отправлять")
         parser.add_argument("--limit", type=int, default=0, help="Обработать не больше N подписок")
+        parser.add_argument(
+            "--i-know-this-is-production",
+            action="store_true",
+            help="Разрешить запуск при DEBUG=True (панель в .env боевая)",
+        )
 
     def handle(self, *args, **options):
+        writes = not options["dry_run"]
+        if writes and settings.DEBUG and not options["i_know_this_is_production"]:
+            raise CommandError(
+                "DEBUG=True — похоже, это локальная машина, а PANEL_API_URL смотрит на боевую "
+                f"панель ({settings.PANEL_API_URL}).\nМассовая заливка отсюда уже однажды создала "
+                "там 269 лишних пользователей.\nЕсли точно нужно — добавьте "
+                "--i-know-this-is-production, а посмотреть без записи можно через --dry-run."
+            )
+
         queryset = Subscription.objects.select_related("user", "plan").order_by("pk")
         if not options["all"]:
             queryset = queryset.exclude(panel_status=PanelSyncStatusEnum.SYNCED)

@@ -14,3 +14,11 @@ DEFAULT_PLANS = [
 ]
 
 DEFAULT_PLAN_PRICES = {device_limit: price for device_limit, price, _, _ in DEFAULT_PLANS}
+
+# (месяцев, скидка %, порядок). Цена считается из цены тарифа, не хранится.
+DEFAULT_PERIODS = [
+    (1, 0, 1),
+    (3, 10, 2),
+    (6, 15, 3),
+    (12, 25, 4),
+]

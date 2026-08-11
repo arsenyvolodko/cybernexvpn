@@ -19,7 +19,8 @@ from typing import Any
 
 from django.conf import settings
 
-from nexvpn.models import GlobalSettings, Plan
+from nexvpn.enums import PaymentKindEnum
+from nexvpn.models import GlobalSettings, NexUser, Payment, Plan
 
 logger = logging.getLogger(__name__)
 
@@ -100,3 +101,73 @@ def build_payment_data(
 
 def new_idempotence_key() -> uuid.UUID:
     return uuid.uuid4()
+
+
+@dataclass(frozen=True)
+class CreatedPayment:
+    url: str
+    amount: int
+    payment: "Payment"
+
+
+def create_payment(
+    user: "NexUser",
+    plan: Plan,
+    *,
+    amount: int,
+    days: int,
+    months: int = 1,
+    kind: str = PaymentKindEnum.PURCHASE,
+    return_url: str | None = None,
+) -> CreatedPayment:
+    """Создать платёж в YooKassa и записать намерение.
+
+    Одна функция на бота и на API: сумма считается снаружи, но всё, что
+    касается «за что заплачено», пишется здесь — иначе вебхук не сможет понять,
+    что начислять, и два пути начали бы расходиться.
+    """
+    import yookassa
+    from django.db import transaction
+
+    from nexvpn.enums import TransactionStatusEnum, TransactionTypeEnum
+    from nexvpn.models import Payment, Transaction
+
+    billing = GlobalSettings.load()
+    if billing.receipt_enabled and not user.email:
+        raise PaymentDataError("Для чека нужен email")
+
+    purpose = PaymentPurpose(
+        amount=amount, plan=plan, days=days,
+        is_plan_change=(kind == PaymentKindEnum.PLAN_CHANGE),
+    )
+    payment_data = build_payment_data(purpose, email=user.email, return_url=return_url, billing=billing)
+
+    with transaction.atomic():
+        idempotence_key = new_idempotence_key()
+        created = yookassa.Payment.create(payment_data, idempotence_key)
+        if created.status != "pending":
+            raise PaymentDataError(f"Неожиданный статус платежа: {created.status}")
+
+        payment = Payment.objects.create(
+            uuid=created.id,
+            idempotence_key=idempotence_key,
+            user=user,
+            kind=kind,
+            plan=plan,
+            amount=amount,
+            period_months=months,
+        )
+        Transaction.objects.create(
+            user=user,
+            is_credit=True,
+            value=amount,
+            payment=payment,
+            type=(
+                TransactionTypeEnum.PLAN_UPGRADE
+                if kind == PaymentKindEnum.PLAN_CHANGE
+                else TransactionTypeEnum.PURCHASE_SUBSCRIPTION
+            ),
+            status=TransactionStatusEnum.WAITING_FOR_CAPTURE,
+        )
+
+    return CreatedPayment(url=created.confirmation.confirmation_url, amount=amount, payment=payment)

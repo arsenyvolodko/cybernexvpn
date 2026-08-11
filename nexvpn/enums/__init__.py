@@ -5,3 +5,4 @@ from .payment_kind_enum import PaymentKindEnum
 from .vat_code_enum import PaymentModeEnum, PaymentSubjectEnum, VatCodeEnum
 from .subscription_event_reason_enum import SubscriptionEventReasonEnum
 from .panel_sync_status_enum import PanelSyncStatusEnum
+from .broadcast_enums import BroadcastAudienceEnum, BroadcastStatusEnum

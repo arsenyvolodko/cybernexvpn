@@ -16,4 +16,17 @@ app.conf.beat_schedule = {
         'task': 'nexvpn.tasks.sync_panel',
         'schedule': crontab(minute='*/5'),
     },
+    # Напоминания об окончании подписки. Раз в 10 минут достаточно: самое
+    # частое смещение — «за час», такая точность человеку незаметна.
+    'subscription-reminders': {
+        'task': 'nexvpn.tasks.send_subscription_reminders',
+        'schedule': crontab(minute='*/10'),
+    },
+    # Срез использования. Панель хранит только «последнее» значение счётчиков,
+    # историю не отдаёт — копим сами. Шаг в десять минут задаёт и точность,
+    # с которой прирост трафика приписывается ноде.
+    'usage-snapshot': {
+        'task': 'nexvpn.tasks.take_usage_snapshot',
+        'schedule': crontab(minute='*/10'),
+    },
 }
