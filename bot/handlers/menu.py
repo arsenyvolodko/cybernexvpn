@@ -3,12 +3,12 @@ import logging
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.types import CallbackQuery, Message
-from django.conf import settings
-
 from bot import texts
+from bot.channel import gate_keyboard, gate_required_for
+from bot.handlers.channel import welcome_text
 from bot.handlers.common import render
 from bot.keyboards import ButtonsStorage, keyboards
-from bot.services import get_trial_plan, register_referral
+from bot.services import register_referral
 from nexvpn.models import NexUser
 
 logger = logging.getLogger(__name__)
@@ -20,26 +20,25 @@ router = Router(name="menu")
 async def handle_start(
     message: Message, command: CommandObject, user: NexUser, user_created: bool
 ) -> None:
-    """Новичку — приветствие с одной кнопкой, остальным просто меню.
+    """Новичку — просьба подписаться, затем приветствие. Остальным просто меню.
 
     Реферальная ссылка выглядит как `t.me/бот?start=<id пригласившего>`, id
-    приезжает сюда в аргументе команды. Засчитываем только новичкам: у того,
-    кто уже пользовался ботом, приглашение всё равно не примут.
+    приезжает сюда в аргументе команды. Приглашение засчитываем **до** экрана
+    подписки: иначе человек, пришедший по ссылке и сходивший в канал, потерял
+    бы её по дороге — параметр в повторном `/start` уже не приедет.
     """
+    if command.args:
+        await register_referral(user, command.args.strip())
+
+    if gate_required_for(user):
+        await message.answer(texts.CHANNEL_GATE, reply_markup=gate_keyboard())
+        return
+
     if not user_created:
         await message.answer(texts.MAIN_MENU, reply_markup=keyboards.main_menu())
         return
 
-    invited = bool(command.args) and await register_referral(user, command.args.strip())
-
-    plan = await get_trial_plan()
-    text = texts.WELCOME.format(
-        trial=texts.plural_days(settings.TRIAL_DAYS),
-        plan=plan.name if plan else texts.plural_devices(settings.TRIAL_PLAN_DEVICES),
-    )
-    if invited:
-        text += texts.WELCOME_REFERRAL
-    await message.answer(text, reply_markup=keyboards.welcome())
+    await message.answer(await welcome_text(user), reply_markup=keyboards.welcome())
 
 
 @router.message(Command("menu"))

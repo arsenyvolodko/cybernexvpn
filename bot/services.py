@@ -93,6 +93,18 @@ def get_or_create_user(telegram_id: int, username: str | None, first_name: str |
 
 
 @sync_to_async
+def mark_joined_channel(user: NexUser) -> None:
+    user.joined_channel = True
+    user.save(update_fields=["joined_channel"])
+
+
+@sync_to_async
+def was_invited(user: NexUser) -> bool:
+    """Пришёл ли человек по чужой ссылке — от этого зависит абзац в приветствии."""
+    return UserInvitation.objects.filter(invitee=user).exists()
+
+
+@sync_to_async
 def get_trial_plan() -> Plan | None:
     """Тариф пробного периода — нужен приветствию, чтобы назвать его словами."""
     return service.trial_plan()

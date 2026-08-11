@@ -10,6 +10,7 @@ from aiogram.types import BotCommand, ErrorEvent
 from django.conf import settings
 
 from bot.handlers import build_router
+from bot.middlewares.channel_gate import ChannelGateMiddleware
 from bot.middlewares.maintenance import MaintenanceMiddleware
 from bot.middlewares.state_reset import StateResetMiddleware
 from bot.middlewares.user import UserMiddleware
@@ -63,6 +64,8 @@ def build_dispatcher() -> Dispatcher:
     for observer in (dispatcher.message, dispatcher.callback_query):
         observer.middleware(MaintenanceMiddleware())
         observer.middleware(UserMiddleware())
+        # После UserMiddleware: заслону нужен уже подтянутый пользователь.
+        observer.middleware(ChannelGateMiddleware())
 
     # Нажал кнопку — значит передумал вводить текст. Только для кнопок:
     # у сообщений состояние как раз и есть то, ради чего они пришли.
