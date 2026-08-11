@@ -62,3 +62,25 @@ def notify_device_connected(chat_id: int, message_id: int, device_title: str) ->
         "sendMessage",
         {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "reply_markup": markup},
     )
+
+
+def notify_payment_applied(chat_id: int, text: str) -> None:
+    """Сказать человеку, что оплата прошла и дни начислены.
+
+    Отдельным сообщением, а не правкой экрана оплаты: между нажатием «оплатить»
+    и возвратом в бот человек успевает походить по меню, и неизвестно, что у
+    него сейчас на экране. Правка вслепую переписала бы что попало.
+
+    Вызывать только из `transaction.on_commit` той транзакции, что проставила
+    `processed_at`. Тогда сообщение уйдёт ровно один раз, кто бы ни начислил
+    первым — вебхук или сверка.
+    """
+    _api(
+        "sendMessage",
+        {
+            "chat_id": chat_id,
+            "text": text,
+            "parse_mode": "HTML",
+            "reply_markup": keyboards.main_menu().model_dump(exclude_none=True),
+        },
+    )

@@ -108,3 +108,22 @@ def send_broadcast(broadcast_id: int):
             await bot.session.close()
 
     return asyncio.run(_run())
+
+
+@shared_task()
+def reconcile_payments():
+    """Спросить ЮKassa про платежи, по которым мы ещё ничего не выдали.
+
+    Вебхук может не дойти — у нас так и вышло, хостера приложения ЮKassa не
+    пускает. Оплата без начисления это худшее, что может случиться в платном
+    сервисе, поэтому не ждём их звонка, а звоним сами.
+    """
+    from nexvpn.subscription import reconcile
+
+    result = reconcile.reconcile()
+    return {
+        "checked": result.checked,
+        "applied": result.applied,
+        "still_pending": result.still_pending,
+        "failed": result.failed,
+    }

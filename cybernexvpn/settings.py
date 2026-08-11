@@ -253,6 +253,11 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 YOOKASSA_OAUTH_TOKEN = env.str("YOOKASSA_OAUTH_TOKEN")
 Configuration.configure_auth_token(YOOKASSA_OAUTH_TOKEN)
+# У SDK ЮKassa нет своего таймаута запроса: `Configuration.timeout` — это
+# пауза между повторами, а само обращение уходит без ограничения. Без этого
+# при обрыве связи вызов висит минутами, и человек в боте видит, что «ничего
+# не происходит». Значение используем и в сверке платежей.
+YOOKASSA_TIMEOUT = env.int("YOOKASSA_TIMEOUT", 20)
 
 # Диапазоны, с которых YooKassa шлёт уведомления.
 # Источник: https://yookassa.ru/developers/using-api/webhooks (сверено 10.08.2026).

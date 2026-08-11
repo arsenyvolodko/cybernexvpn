@@ -25,6 +25,12 @@ app.conf.beat_schedule = {
     # Срез использования. Панель хранит только «последнее» значение счётчиков,
     # историю не отдаёт — копим сами. Шаг в десять минут задаёт и точность,
     # с которой прирост трафика приписывается ноде.
+    # Страховка на случай недоставленного вебхука от ЮKassa: минута задержки
+    # с начислением терпима, потерянная оплата — нет.
+    'reconcile-payments': {
+        'task': 'nexvpn.tasks.reconcile_payments',
+        'schedule': crontab(minute='*'),
+    },
     'usage-snapshot': {
         'task': 'nexvpn.tasks.take_usage_snapshot',
         'schedule': crontab(minute='*/10'),

@@ -10,7 +10,7 @@ from yookassa.domain.notification import WebhookNotification
 
 from nexvpn.enums import PaymentKindEnum, PaymentStatusEnum, TransactionStatusEnum
 from nexvpn.models import Payment, Transaction
-from nexvpn.subscription import panel_sync, service
+from nexvpn.subscription import panel_sync, reconcile, service
 from nexvpn.webhook_ips import verify_webhook_source
 
 logger = logging.getLogger(__name__)
@@ -71,6 +71,8 @@ def handle_notification(request: Request) -> Response:
     if subscription is not None:
         # Панель дёргаем уже после коммита: её недоступность не должна откатывать оплату.
         panel_sync.sync_subscription(subscription)
+    # Сообщение — тем же кодом, что и у сверки: событие одно, текст должен быть один.
+    reconcile.notify_paid(payment, subscription)
 
     return Response(status=200)
 
