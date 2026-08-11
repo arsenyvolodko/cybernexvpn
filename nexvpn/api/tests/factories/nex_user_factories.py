@@ -1,7 +1,7 @@
 from factory import Faker
 from factory.django import DjangoModelFactory
 
-from nexvpn.models import NexUser, UserBalance
+from nexvpn.models import NexUser
 
 
 class NexUserFactory(DjangoModelFactory):
@@ -9,11 +9,3 @@ class NexUserFactory(DjangoModelFactory):
 
     class Meta:
         model = NexUser
-
-
-class UserBalanceFactory(DjangoModelFactory):
-    user = Faker("user_name")
-    value = Faker("random_int")
-
-    class Meta:
-        model = UserBalance

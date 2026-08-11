@@ -33,25 +33,20 @@ DEBUG = env.bool("DEBUG", default=True)
 
 BASE_URL = env.str("BASE_URL", default="http://localhost:8000")
 
-ALLOWED_HOSTS = [
-    "www.cybernexvpn.ru",
-    "cybernexvpn.ru",
-    "localhost",
-    "127.0.0.1:8000",
-    "127.0.0.1",
-    "77.238.236.90",
-    "176.124.203.129",
-    "176.124.203.129:8000",
-
-    # yookassa
-    "185.71.76.0",
-    "185.71.77.0",
-    "77.75.153.0/25",
-    "77.75.156.11",
-    "77.75.156.35",
-    "77.75.154.128",
-    "2a02:5180::/32"
-]
+ALLOWED_HOSTS = env.list(
+    "ALLOWED_HOSTS",
+    default=[
+        "www.cybernexvpn.ru",
+        "cybernexvpn.ru",
+        "localhost",
+        "127.0.0.1",
+        "127.0.0.1:8000",
+        # IP серверов, на которых крутился проект.
+        "77.238.236.90",
+        "176.124.203.129",
+        "176.124.203.129:8000",
+    ],
+)
 
 CSRF_TRUSTED_ORIGINS = [BASE_URL, "https://www.cybernexvpn.ru", "https://cybernexvpn.ru"]
 
@@ -71,13 +66,13 @@ INSTALLED_APPS = [
     "django_celery_beat",
 
     "nexvpn",
+    "bot",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
-    "cybernexvpn.middleware.YookassaCallbackMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
@@ -231,7 +226,9 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = "UTC"
+# Сервис российский: даты и время в админке и в боте показываем по Москве.
+# В БД Django всё равно хранит UTC (USE_TZ=True) — меняется только отображение.
+TIME_ZONE = "Europe/Moscow"
 
 USE_I18N = True
 
@@ -257,15 +254,91 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 YOOKASSA_OAUTH_TOKEN = env.str("YOOKASSA_OAUTH_TOKEN")
 Configuration.configure_auth_token(YOOKASSA_OAUTH_TOKEN)
 
+# Диапазоны, с которых YooKassa шлёт уведомления.
+# Источник: https://yookassa.ru/developers/using-api/webhooks (сверено 10.08.2026).
+YOOKASSA_WEBHOOK_IPS = env.list(
+    "YOOKASSA_WEBHOOK_IPS",
+    default=[
+        "185.71.76.0/27",
+        "185.71.77.0/27",
+        "77.75.153.0/25",
+        "77.75.156.11",
+        "77.75.156.35",
+        "77.75.154.128/25",
+        "2a02:5180::/32",
+    ],
+)
+# Пока False — чужой адрес только пишется в лог. Включать после того, как
+# в логах видно, что настоящие уведомления опознаются: ошибка в числе прокси
+# при строгом режиме тихо обрушит приём всех платежей.
+YOOKASSA_IP_CHECK_ENFORCE = env.bool("YOOKASSA_IP_CHECK_ENFORCE", False)
+# Сколько наших прокси стоит перед Django. На проде это системный nginx — один.
+TRUSTED_PROXY_COUNT = env.int("TRUSTED_PROXY_COUNT", 1)
+
 ADMIN_API_KEY = env.str("ADMIN_API_KEY")
 
 TG_BOT_URL = env.str("TG_BOT_URL")
-TG_BOT_API_URL = env.str("TG_BOT_API_URL")
-TG_BOT_API_KEY = env.str("TG_BOT_API_KEY")
+TG_BOT_TOKEN = env.str("TG_BOT_TOKEN", "")
+# Через env.int нельзя: пустое значение в .env (а в шаблоне оно пустое)
+# роняет каст, и Django не стартует вовсе.
+TG_ADMIN_USER_ID = int(env.str("TG_ADMIN_USER_ID", "") or 0)
+SUPPORT_CONTACT = env.str("SUPPORT_CONTACT", "@cybernexvpn")
+# Страница-мостик: Telegram не пускает в inline-кнопки схемы вроде happ://,
+# поэтому нужна https-страница, которая покажет кнопку с этой схемой.
+# Пусто — ведём на штатную страницу подписки Remnawave.
+CONNECT_BRIDGE_URL = env.str("CONNECT_BRIDGE_URL", "")
+
+# Remnawave
+PANEL_API_URL = env.str("PANEL_API_URL", "https://panel.pineferry.com")
+PANEL_API_TOKEN = env.str("PANEL_API_TOKEN", "")
+PANEL_API_TIMEOUT = env.int("PANEL_API_TIMEOUT", 15)
+# Совпадает с WEBHOOK_SECRET_HEADER в .env панели. Пусто — вебхуки отклоняются:
+# принимать неподписанные события о чужих устройствах нельзя.
+REMNAWAVE_WEBHOOK_SECRET = env.str("REMNAWAVE_WEBHOOK_SECRET", "")
 
 # Business Variables
-START_BALANCE = env.int("START_PRICE", 150)
-INVITATION_BONUS = env.int("INVITATION_BONUS", 50)
+# Длина расчётного периода. Цены тарифов заданы за этот срок, из него же считается
+# стоимость дня при смене тарифа. 30, а не «календарный месяц», — чтобы вся
+# арифметика оставалась целочисленной и предсказуемой.
+DAYS_IN_PERIOD = env.int("DAYS_IN_PERIOD", 30)
 
-SEND_UPDATES_REMINDER_TIME = env.str("SEND_UPDATES_REMINDER_TIME", "10:00")
-SEND_UPDATES_TIME = env.str("SEND_UPDATES_TIME", "03:00")
+# Час, на который округляется вверх окончание подписки (по TIME_ZONE).
+# 20:00 выбрано не случайно: при нём все напоминания (за 7 дней, 2 суток, сутки,
+# 12/6/2/1 час) попадают в промежуток с 08:00 до 20:00 — ни одного ночного пуша.
+# Округление всегда вверх: человек может получить несколько часов сверху, но не потерять.
+SUBSCRIPTION_EXPIRY_HOUR = env.int("SUBSCRIPTION_EXPIRY_HOUR", 20)
+
+# За сколько часов до окончания напоминать. Порядок не важен, дубли отсекаются.
+SUBSCRIPTION_REMINDER_HOURS = env.list(
+    "SUBSCRIPTION_REMINDER_HOURS", cast=int, default=[168, 48, 24, 12, 6, 2, 1]
+)
+
+# Пробный период для по-настоящему новых пользователей.
+TRIAL_DAYS = env.int("TRIAL_DAYS", 3)
+TRIAL_PLAN_DEVICES = env.int("TRIAL_PLAN_DEVICES", 3)
+
+# Реферальная программа: обоим начисляется после ПЕРВОЙ оплаты приглашённого.
+REFERRAL_INVITER_DAYS = env.int("REFERRAL_INVITER_DAYS", 10)
+REFERRAL_INVITEE_DAYS = env.int("REFERRAL_INVITEE_DAYS", 10)
+
+# Миграция старой базы
+LEGACY_CUTOFF_DATE = env.str("LEGACY_CUTOFF_DATE", "2026-08-03")
+LEGACY_MAX_DEVICES = env.int("LEGACY_MAX_DEVICES", 10)
+# Кому на дату среза не досталось ни одного активного устройства: эти уже ушли,
+# 30 дней — попытка вернуть.
+LEGACY_NO_DEVICES_DAYS = env.int("LEGACY_NO_DEVICES_DAYS", 30)
+LEGACY_NO_DEVICES_PLAN_DEVICES = env.int("LEGACY_NO_DEVICES_PLAN_DEVICES", 3)
+# Нижний порог. С 3 августа бот фактически не работал, пополниться было негде,
+# поэтому у кого период кончился в эти дни — не виноваты и без подписки не остаются.
+LEGACY_MIN_DAYS = env.int("LEGACY_MIN_DAYS", 7)
+# Потолок на конвертацию, чтобы пара человек с огромным балансом не сидела бесплатно годами.
+LEGACY_MAX_DAYS = env.int("LEGACY_MAX_DAYS", 180)
+# Аккаунты, которым баланс заливали руками мимо транзакций (свои и друзья): вместо
+# конвертации получают условно бесконечную подписку на максимальном тарифе.
+# Порог выбран по реальным данным — выше 1000₽ ровно эти шестеро, следующий баланс 850₽.
+LEGACY_UNLIMITED_BALANCE = env.int("LEGACY_UNLIMITED_BALANCE", 1000)
+LEGACY_UNLIMITED_DAYS = env.int("LEGACY_UNLIMITED_DAYS", 3650)
+LEGACY_UNLIMITED_PLAN_DEVICES = env.int("LEGACY_UNLIMITED_PLAN_DEVICES", 10)
+
+# Настройки чека 54-ФЗ живут не здесь, а в модели GlobalSettings — чтобы их
+# можно было включить и поправить из админки, когда подключится касса.

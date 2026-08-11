@@ -1,63 +1,98 @@
-import asyncio
 import json
 import logging
 
-logger = logging.getLogger(__name__)
-
 from django.db import transaction
+from django.utils.timezone import now
 from rest_framework.decorators import api_view
 from rest_framework.request import Request
 from rest_framework.response import Response
 from yookassa.domain.notification import WebhookNotification
 
-from nexvpn.utils import succeed_payment
-from nexvpn.enums import PaymentStatusEnum, TransactionStatusEnum
-from nexvpn.models import Payment, Transaction, UserBalance
+from nexvpn.enums import PaymentKindEnum, PaymentStatusEnum, TransactionStatusEnum
+from nexvpn.models import Payment, Transaction
+from nexvpn.subscription import panel_sync, service
+from nexvpn.webhook_ips import verify_webhook_source
+
+logger = logging.getLogger(__name__)
 
 EXPECTED_WEBHOOK_TYPE = "notification"
 
 
 @api_view(["POST"])
 def handle_notification(request: Request) -> Response:
-    payment_json = json.loads(request.body)
+    """Уведомление YooKassa.
+
+    Почти всегда отвечаем 200, даже на мусор: иначе YooKassa будет слать
+    повторы сутки. Реальная защита от двойного начисления — `processed_at`.
+    """
+    allowed, source_ip = verify_webhook_source(request)
+    if not allowed:
+        # Не 200: это не YooKassa, и повторов от неё ждать незачем.
+        return Response(status=403)
+
     try:
-        webhook = WebhookNotification(payment_json)
-    except Exception as e:
-        logger.error(f"Error parsing webhook: {e}")
+        webhook = WebhookNotification(json.loads(request.body))
+    except Exception as exc:
+        logger.error("Не удалось разобрать вебхук с %s: %s", source_ip, exc)
         return Response(status=400)
 
     if not (webhook.type == EXPECTED_WEBHOOK_TYPE and webhook.event in PaymentStatusEnum.values):
-        # Return 200 to YooKassa to avoid repeated requests
         return Response(status=200)
 
     new_status = PaymentStatusEnum(value=webhook.event)
-    payment_obj = webhook.object
+    payment_id = webhook.object.id
 
-    payment = Payment.objects.filter(uuid=payment_obj.id).first()
-    payment_transaction: Transaction = Transaction.objects.filter(payment__isnull=False, payment=payment).first()
+    with transaction.atomic():
+        payment = Payment.objects.select_for_update().filter(uuid=payment_id).first()
+        if payment is None:
+            logger.warning("Вебхук по неизвестному платежу: %s", payment_id)
+            return Response(status=200)
 
-    if not (payment and payment_transaction):
-        logger.warning(
-            f"Cannot process webhook: payment or transaction not found: "
-            f"payment_id={payment_obj.id}. Webhook data: {payment_json}"
+        payment_transaction = Transaction.objects.filter(payment=payment).first()
+
+        if new_status == PaymentStatusEnum.CANCELED:
+            if payment_transaction:
+                payment_transaction.status = TransactionStatusEnum.FAILED
+                payment_transaction.save(update_fields=["status"])
+            return Response(status=200)
+
+        if payment.processed_at is not None:
+            logger.info("Повторный вебхук по уже обработанному платежу %s", payment_id)
+            return Response(status=200)
+
+        if payment_transaction:
+            payment_transaction.status = TransactionStatusEnum.SUCCEEDED
+            payment_transaction.save(update_fields=["status"])
+
+        subscription = _apply_payment(payment)
+        payment.processed_at = now()
+        payment.save(update_fields=["processed_at"])
+
+    if subscription is not None:
+        # Панель дёргаем уже после коммита: её недоступность не должна откатывать оплату.
+        panel_sync.sync_subscription(subscription)
+
+    return Response(status=200)
+
+
+def _apply_payment(payment: Payment):
+    """Выдать то, за что заплачено. Условия берём из Payment, не из вебхука."""
+    if payment.user is None or payment.plan is None:
+        logger.error("Платёж %s без пользователя или тарифа — начислять нечего", payment.uuid)
+        return None
+
+    if payment.kind == PaymentKindEnum.PLAN_CHANGE:
+        return service.change_plan_now(
+            user=payment.user,
+            new_plan=payment.plan,
+            amount_paid=payment.amount or 0,
+            payment=payment,
         )
 
-        # Return 200 to YooKassa to avoid repeated requests
-        return Response(status=200)
-
-    if new_status == PaymentStatusEnum.CANCELED:
-        payment_transaction.status = TransactionStatusEnum.FAILED
-        payment_transaction.save()
-        return Response(status=200)
-
-    # Payment succeeded
-    with transaction.atomic():
-        payment_transaction.status = TransactionStatusEnum.SUCCEEDED
-        payment_transaction.save()
-
-        user_balance = UserBalance.objects.select_for_update().get(user=payment_transaction.user)
-        user_balance.value += payment_transaction.value
-        user_balance.save()
-
-        asyncio.run(succeed_payment(payment_id=str(payment.uuid), user_id=payment_transaction.user.id))
-        return Response(status=200)
+    return service.purchase_period(
+        user=payment.user,
+        plan=payment.plan,
+        amount=payment.amount or 0,
+        payment=payment,
+        months=payment.period_months or 1,
+    )

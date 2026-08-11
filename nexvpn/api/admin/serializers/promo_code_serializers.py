@@ -9,7 +9,7 @@ class PromoCodeRequestSerializer(serializers.Serializer):
 
 
 class PromoCodeResponseSerializer(serializers.Serializer):
-    value = serializers.IntegerField()
+    bonus_days = serializers.IntegerField()
 
     class Meta:
-        fields = ("value",)
+        fields = ("bonus_days",)

@@ -6,12 +6,12 @@ from nexvpn.models import NexUser
 class NexUserSerializer(serializers.ModelSerializer):
     username = serializers.CharField(allow_null=True)
     first_name = serializers.CharField(allow_null=True, allow_blank=True, required=False)
-    balance = serializers.IntegerField(read_only=True)
+    is_activated = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = NexUser
-        fields = ('id', 'username', 'first_name', 'email', 'balance', 'token')
-        read_only_fields = ('id', 'balance', 'token')
+        fields = ("id", "username", "first_name", "email", "token", "is_legacy", "is_activated", "activated_at")
+        read_only_fields = ("id", "token", "is_legacy", "is_activated", "activated_at")
 
 
 class NexUserUpdateSerializer(serializers.ModelSerializer):
@@ -21,4 +21,4 @@ class NexUserUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = NexUser
-        fields = ('username', 'first_name', 'email')
+        fields = ("username", "first_name", "email")

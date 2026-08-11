@@ -1,0 +1,82 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<style>
+  .usage h2 { margin: 24px 0 8px; }
+  .usage table { border-collapse: collapse; width: 100%; margin-bottom: 8px; }
+  .usage th, .usage td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #ddd; }
+  .usage th { font-weight: 600; white-space: nowrap; }
+  .usage .num { text-align: right; white-space: nowrap; }
+  .usage .bar { background: #79aec8; height: 10px; display: inline-block; vertical-align: middle; }
+  .usage .periods a { margin-right: 10px; }
+  .usage .periods .active { font-weight: 700; text-decoration: none; }
+  .usage .note { color: #666; font-size: 12px; margin: 4px 0 16px; }
+  .usage .never { color: #b32; font-weight: 600; }
+</style>
+
+<div class="usage">
+  <p class="periods">
+    Период:
+    {% for period in periods %}
+      <a href="?days={{ period }}" {% if period == days %}class="active"{% endif %}>{{ period }} дн.</a>
+    {% endfor %}
+  </p>
+
+  <h2>По нодам</h2>
+  <p class="note">
+    Панель отдаёт трафик с точностью до ноды. На eu1 и ru1 у нас по три профиля,
+    поэтому «какой именно туннель» отсюда не видно — для этого нужна статистика
+    по инбаундам с самих нод.
+  </p>
+  <table>
+    <tr><th>Нода</th><th class="num">Людей</th><th class="num">Трафик</th><th>Доля</th></tr>
+    {% for node in nodes %}
+      <tr>
+        <td>{{ node.name }}</td>
+        <td class="num">{{ node.users }}</td>
+        <td class="num">{{ node.bytes }}</td>
+        <td><span class="bar" style="width: {{ node.share }}%"></span> {{ node.share }}%</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="4">Пока пусто — первый срез снимется в ближайшие десять минут.</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2>Молчащие — {{ silent_total }}</h2>
+  <p class="note">
+    Подписка активна, а трафика нет больше суток. Если туннель душит DPI, на
+    сервере не остаётся никаких следов попытки — поэтому «не работает» видно
+    только вот так, от обратного. Тех, кто не подключался ни разу, отмечаем
+    отдельно: у них проблема с первым запуском, а не с отвалившимся туннелем.
+  </p>
+  <table>
+    <tr><th>Пользователь</th><th>Статус</th><th>Последний раз онлайн</th><th>Подписка до</th></tr>
+    {% for row in silent %}
+      <tr>
+        <td>{{ row.user }}</td>
+        <td>{% if row.never %}<span class="never">ни разу не подключался</span>{% else %}замолчал{% endif %}</td>
+        <td>{{ row.last_online|default:"—" }}</td>
+        <td>{{ row.expires_at|date:"d.m.Y" }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="4">Никто не молчит.</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2>По людям</h2>
+  <table>
+    <tr><th>Пользователь</th><th class="num">Трафик</th><th>Ноды за период</th><th>Сейчас на</th><th>Онлайн</th></tr>
+    {% for row in users %}
+      <tr>
+        <td>{{ row.user }}</td>
+        <td class="num">{{ row.bytes }}</td>
+        <td>{{ row.nodes }}</td>
+        <td>{{ row.current_node|default:"—" }}</td>
+        <td>{{ row.online_at|default:"—" }}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="5">Пока пусто.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}
