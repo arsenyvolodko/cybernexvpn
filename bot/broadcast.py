@@ -19,7 +19,7 @@ from django.conf import settings
 from django.utils.timezone import now
 
 from nexvpn.enums import BroadcastAudienceEnum, BroadcastStatusEnum
-from nexvpn.models import Broadcast, BroadcastDelivery, NexUser
+from nexvpn.models import Broadcast, BroadcastDelivery, NexUser, PanelPresence
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,22 @@ def recipients(broadcast: Broadcast) -> list[NexUser]:
         users = users.filter(legacy_record__device_count__gt=0)
     elif broadcast.audience == BroadcastAudienceEnum.NEW:
         users = users.filter(is_legacy=False, legacy_record__isnull=True)
+    elif broadcast.audience == BroadcastAudienceEnum.NOT_ACTIVATED:
+        # Не открывал бота новой версии ни разу: `activated_at` ставится при
+        # первом же заходе. Практически это те, кого мы перенесли, а они о
+        # перезапуске так и не узнали.
+        users = users.filter(activated_at=None)
+    elif broadcast.audience == BroadcastAudienceEnum.NOT_CONNECTED:
+        # Зашёл, подписку получил, но туннель не поднял ни разу.
+        #
+        # Судим по `PanelPresence`: строка появляется со снимком телеметрии, а
+        # `first_connected_at` в неё приходит из панели. Требуем именно
+        # существующую строку — не «нет строки», а «строка есть, и в ней
+        # пусто». Иначе при невыполнявшейся телеметрии (celery-beat в проде
+        # поднят не всегда) группа молча раздуется до всех сразу, и объявление
+        # «у тебя не получилось подключиться» уедет тем, у кого всё работает.
+        never_connected = PanelPresence.objects.filter(first_connected_at=None).values("user_id")
+        users = users.exclude(activated_at=None).filter(pk__in=never_connected)
 
     already = BroadcastDelivery.objects.filter(
         broadcast=broadcast, is_delivered=True

@@ -13,7 +13,7 @@ from asgiref.sync import async_to_sync
 from bot import broadcast as broadcast_module
 from nexvpn.api.tests.factories import NexUserFactory
 from nexvpn.enums import BroadcastAudienceEnum, BroadcastStatusEnum
-from nexvpn.models import Broadcast, BroadcastDelivery, LegacyMigrationRecord
+from nexvpn.models import Broadcast, BroadcastDelivery, LegacyMigrationRecord, PanelPresence
 
 pytestmark = pytest.mark.django_db
 
@@ -105,6 +105,41 @@ def test_gifted_and_converted_are_different_groups():
 
     assert [u.pk for u in to_gifted] == [gifted.pk]
     assert [u.pk for u in to_converted] == [converted.pk]
+
+
+def test_those_who_never_opened_the_bot_are_their_own_group():
+    from django.utils.timezone import now
+
+    never_came = NexUserFactory(is_legacy=True, activated_at=None)
+    NexUserFactory(is_legacy=True, activated_at=now())
+
+    targets = broadcast_module.recipients(
+        make_broadcast(audience=BroadcastAudienceEnum.NOT_ACTIVATED)
+    )
+
+    assert [u.pk for u in targets] == [never_came.pk]
+
+
+def test_never_connected_needs_a_presence_row():
+    """Иначе объявление «у тебя не получилось» уедет тем, у кого всё работает.
+
+    Пустая телеметрия — штатная ситуация: celery-beat в проде поднят не всегда.
+    В этом случае группа обязана быть пустой, а не всеми подряд.
+    """
+    from django.utils.timezone import now
+
+    stuck = NexUserFactory(activated_at=now())
+    connected = NexUserFactory(activated_at=now())
+    no_telemetry_yet = NexUserFactory(activated_at=now())
+    PanelPresence.objects.create(user=stuck, first_connected_at=None)
+    PanelPresence.objects.create(user=connected, first_connected_at=now())
+
+    targets = broadcast_module.recipients(
+        make_broadcast(audience=BroadcastAudienceEnum.NOT_CONNECTED)
+    )
+
+    assert [u.pk for u in targets] == [stuck.pk]
+    assert no_telemetry_yet.pk not in [u.pk for u in targets]
 
 
 def test_test_only_goes_to_the_admin_alone(settings):
