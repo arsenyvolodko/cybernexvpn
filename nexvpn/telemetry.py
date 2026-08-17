@@ -1,4 +1,4 @@
-"""Снимки использования: кто, когда и через какую ноду ходит.
+"""Снимки использования: кто, когда и через какой туннель ходит.
 
 Зачем это нужно. Сбой, который волнует больше всего — когда туннель душит DPI, —
 на сервере не оставляет никаких следов: пакет до ноды просто не доходит. Значит
@@ -11,6 +11,13 @@
 Панель хранит только последнее значение счётчиков, историю не отдаёт. Поэтому
 историю копим сами: раз в несколько минут забираем срез и раскладываем прирост
 по суткам и нодам.
+
+Дальше ноды панель не видит: трафик она отдаёт с точностью до ноды, а на eu1 и
+eu2 у нас по пять туннелей. «Какой именно туннель» приезжает вторым, встречным
+потоком — сборщик на ноде читает access log Xray и присылает сюда счётчики по
+инбаундам (`record_inbound_usage`). Байтов в этом потоке нет и не будет: Xray
+считает трафик по пользователю и по инбаунду двумя счётчиками, которые никогда
+не пересекаются.
 """
 
 import logging
@@ -18,12 +25,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from django.db import transaction
-from django.db.models import Count, F, Q, Sum
+from django.db.models import Count, F, Max, Q, Sum
 from django.utils.dateparse import parse_datetime
 from django.utils.timezone import localdate, now
 
 from nexvpn.enums import PanelSyncStatusEnum
-from nexvpn.models import NexUser, NodeUsageDay, PanelPresence, Subscription
+from nexvpn.models import InboundUsageDay, NexUser, NodeUsageDay, PanelPresence, Subscription
 from nexvpn.remnawave.client import RemnawaveClient
 
 logger = logging.getLogger(__name__)
@@ -200,6 +207,145 @@ def usage_by_node(days: int = 7) -> list[dict]:
         }
         for row in rows
     ]
+
+
+@dataclass
+class IngestResult:
+    stored: int
+    unknown_users: int
+
+
+def record_inbound_usage(node_name: str, rows: list[dict]) -> IngestResult:
+    """Принять счётчики по туннелям от сборщика на ноде.
+
+    Значения абсолютные (итог за сутки, а не приращение), поэтому пишем их
+    как есть: повторная доставка и пропущенный запуск ничего не портят.
+
+    `email` в access log — это числовой id пользователя **в панели**, тот же,
+    что лежит в `Subscription.panel_user_id`. Через него и связываем: разбирать
+    `tg_<id>` из имени не нужно.
+    """
+    by_panel_id = dict(
+        Subscription.objects.exclude(panel_user_id=None).values_list("panel_user_id", "user_id")
+    )
+    stored = unknown = 0
+
+    for row in rows:
+        user_id = by_panel_id.get(row.get("panel_user_id"))
+        if user_id is None:
+            unknown += 1
+            continue
+        InboundUsageDay.objects.update_or_create(
+            user_id=user_id,
+            node_name=node_name,
+            inbound_tag=row["inbound_tag"],
+            via_relay=bool(row.get("via_relay")),
+            date=row["date"],
+            defaults={
+                "connections": row.get("connections") or 0,
+                "last_seen": _as_datetime(row.get("last_seen")),
+            },
+        )
+        stored += 1
+
+    logger.info("Туннели с ноды %s: записано %s, вне нашей базы: %s", node_name, stored, unknown)
+    return IngestResult(stored=stored, unknown_users=unknown)
+
+
+def usage_by_tunnel(days: int = 7) -> list[dict]:
+    """Сводка по туннелям: сколько людей и сколько соединений на каждом.
+
+    Туннель здесь — тройка «нода + инбаунд + пришёл ли через релей». Именно она
+    однозначно отвечает строке подписки, которую видит человек: инбаунд один и
+    тот же может лежать под двумя разными профилями, отличаясь только тем,
+    заходят в него напрямую или через Москву.
+    """
+    since = localdate() - timedelta(days=days - 1)
+    rows = (
+        InboundUsageDay.objects.filter(date__gte=since)
+        .values("node_name", "inbound_tag", "via_relay")
+        .annotate(
+            total_connections=Sum("connections"),
+            # Только те, кто реально соединялся: нулевую строку сборщик не шлёт,
+            # но пусть условие переживёт смену его поведения.
+            active_users=Count("user_id", distinct=True, filter=Q(connections__gt=0)),
+        )
+        .order_by("-total_connections")
+    )
+    return [
+        {
+            "node_name": row["node_name"],
+            "inbound_tag": row["inbound_tag"],
+            "via_relay": row["via_relay"],
+            "connections": row["total_connections"] or 0,
+            "users": row["active_users"],
+        }
+        for row in rows
+    ]
+
+
+def tunnels_by_user(days: int = 7, user_ids: list[int] | None = None) -> dict[int, list[dict]]:
+    """Кто какими туннелями пользуется — разложено по людям."""
+    since = localdate() - timedelta(days=days - 1)
+    query = InboundUsageDay.objects.filter(date__gte=since)
+    if user_ids is not None:
+        query = query.filter(user_id__in=user_ids)
+
+    per_user: dict[int, list[dict]] = {}
+    for row in (
+        query.values("user_id", "node_name", "inbound_tag", "via_relay")
+        .annotate(connections=Sum("connections"), last_seen=Max("last_seen"))
+        .order_by("-connections")
+    ):
+        per_user.setdefault(row["user_id"], []).append(row)
+    return per_user
+
+
+def profile_names(client: RemnawaveClient | None = None) -> dict[tuple[str, str, bool], str]:
+    """Как туннель называется для человека в подписке.
+
+    Ключ — та же тройка «нода, инбаунд, через релей»; значение — remark хоста,
+    то есть ровно та строка, которую человек видит в приложении. Без этого
+    в админке были бы теги вида `VLESS-GRPC`, по которым непонятно, о каком из
+    девяти профилей речь.
+
+    Панель — не источник правды для статистики, поэтому её недоступность здесь
+    не должна ломать страницу: не смогли — вернём пустой словарь, названия
+    отрисуются техническими.
+    """
+    from django.conf import settings
+
+    client = client or RemnawaveClient()
+    try:
+        nodes = client.list_nodes()
+        hosts = client.list_hosts()
+    except Exception as exc:  # панель лежит — страница всё равно должна открыться
+        logger.warning("Не удалось получить названия профилей из панели: %s", exc)
+        return {}
+
+    relay = settings.RELAY_NODE_ADDRESS
+    by_address: dict[tuple[str, str], list[str]] = {}
+    tags = {inbound["uuid"]: inbound["tag"] for inbound in client.list_inbounds()}
+    for host in hosts:
+        tag = tags.get(host.get("inboundUuid"))
+        if not tag:
+            continue
+        by_address.setdefault((host.get("address", ""), tag), []).append(host.get("remark", ""))
+
+    names: dict[tuple[str, str, bool], str] = {}
+    for node in nodes:
+        node_name = node.get("name", "")
+        node_address = node.get("address", "")
+        for (address, tag), remarks in by_address.items():
+            if address == node_address:
+                # Хост указывает на саму ноду — значит, заходят напрямую.
+                # Для самого релея это тоже верно: его собственный инбаунд.
+                names[(node_name, tag, False)] = " / ".join(sorted(remarks))
+            elif address == relay:
+                # Хост указывает на релей, а инбаунд лежит здесь: релей
+                # пробрасывает соединение сюда, и мы увидим его с его адреса.
+                names[(node_name, tag, True)] = " / ".join(sorted(remarks))
+    return names
 
 
 def usage_by_user(days: int = 7, limit: int = 100) -> list[dict]:

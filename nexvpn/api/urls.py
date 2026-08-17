@@ -5,6 +5,7 @@ from .admin.urls import urlpatterns as admin_urls
 from .notifications.urls import urlpatterns as yookassa_urls
 from .notifications.remnawave import handle_webhook
 from .notifications.views import handle_notification
+from .telemetry.urls import urlpatterns as telemetry_urls
 from .user.views import me
 
 urlpatterns = [
@@ -13,4 +14,5 @@ urlpatterns = [
     path("payment_succeeded/", handle_notification),
     path("yookassa/", include(yookassa_urls)),
     path("remnawave/webhook/", handle_webhook),
+    path("telemetry/", include(telemetry_urls)),
 ]

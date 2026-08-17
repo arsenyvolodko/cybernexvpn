@@ -172,6 +172,25 @@ class RemnawaveClient:
             return response
         return (response or {}).get("nodes", [])
 
+    # --- хосты и инбаунды ----------------------------------------------
+
+    def list_hosts(self) -> list[dict[str, Any]]:
+        """Строки подписки: адрес, порт, привязка к инбаунду и remark.
+
+        Remark — единственное место, где туннель назван человеческим языком.
+        Всё остальное в панели оперирует тегами вроде `VLESS-GRPC`, по которым
+        нельзя понять, о каком из девяти профилей идёт речь.
+        """
+        response = self._request("GET", "/api/hosts")
+        if isinstance(response, list):
+            return response
+        return (response or {}).get("hosts", [])
+
+    def list_inbounds(self) -> list[dict[str, Any]]:
+        """Инбаунды всех конфиг-профилей: нужны, чтобы развернуть uuid в тег."""
+        response = self._request("GET", "/api/config-profiles/inbounds") or {}
+        return response.get("inbounds", [])
+
     # --- squad'ы -------------------------------------------------------
 
     def list_internal_squads(self) -> list[dict[str, Any]]:

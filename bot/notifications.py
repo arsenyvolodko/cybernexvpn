@@ -14,7 +14,7 @@ import logging
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from django.conf import settings
 from django.db import IntegrityError
-from django.utils.timezone import now
+from django.utils.timezone import localtime, now
 
 from bot import texts
 from bot.keyboards import keyboards
@@ -70,15 +70,28 @@ def _timedelta_hours(hours: int):
     return timedelta(hours=hours)
 
 
-def build_text(subscription: Subscription, hours_before: int) -> str:
+def build_text(subscription: Subscription) -> str:
+    """Текст напоминания.
+
+    «Осталось» считаем по реальному времени до конца, а не по номиналу
+    сработавшего смещения. Смещение — только повод отправить: после продления
+    ближайшим сработавшим оказывается самое дальнее из них, и человек с двумя
+    сутками в запасе получал «осталось 7 дней» рядом с верной датой.
+
+    Округляем вниз: обещать времени больше, чем есть, в напоминании об
+    окончании — ровно та ошибка, от которой оно должно защищать.
+    """
     plan_title = texts.plural_devices(subscription.plan.device_limit)
-    if hours_before >= 24:
-        left = texts.plural_days(round(hours_before / 24))
+    hours_left = (subscription.expires_at - now()).total_seconds() / 3600
+    if hours_left >= 24:
+        left = texts.plural_days(int(hours_left // 24))
     else:
-        left = texts.plural_hours(hours_before)
+        left = texts.plural_hours(max(1, int(hours_left)))
     return texts.REMINDER.format(
         left=left,
-        until=subscription.expires_at.strftime("%d.%m в %H:%M"),
+        # Время локальное: в базе оно в UTC, и без перевода человек читал бы
+        # «до 20:00» как «до 17:00».
+        until=localtime(subscription.expires_at).strftime("%d.%m в %H:%M"),
         plan=plan_title,
     )
 
@@ -95,6 +108,18 @@ async def send_due_reminders(bot) -> tuple[int, int]:
 
     sent = failed = 0
     for subscription, hours_before in pending:
+        # Текст собираем до отметки об отправке. Если он не собрался, отметки
+        # быть не должно: иначе сбой не только не отправит напоминание, но и
+        # навсегда закроет это смещение для человека.
+        try:
+            text = build_text(subscription)
+        except Exception:
+            # Один человек не должен уносить с собой всю пачку: дальше по списку
+            # стоят те, кому напоминание ещё можно доставить вовремя.
+            logger.exception("Не собрали напоминание для подписки %s", subscription.pk)
+            failed += 1
+            continue
+
         # Отметку ставим до отправки: повторить пропущенное напоминание не
         # страшно, а отправить одно и то же дважды — заметно и неприятно.
         try:
@@ -106,7 +131,7 @@ async def send_due_reminders(bot) -> tuple[int, int]:
         except IntegrityError:
             continue
 
-        if await _send(bot, subscription.user_id, build_text(subscription, hours_before)):
+        if await _send(bot, subscription.user_id, text):
             sent += 1
         else:
             failed += 1

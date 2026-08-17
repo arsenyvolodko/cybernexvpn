@@ -8,6 +8,7 @@ from nexvpn.models import (
     Broadcast,
     BroadcastDelivery,
     GlobalSettings,
+    InboundUsageDay,
     LegacyMigrationRecord,
     NexUser,
     NodeUsageDay,
@@ -184,11 +185,36 @@ class UsageDashboardAdmin(admin.ModelAdmin):
         silent = telemetry.silent_users()
         total = sum(row["bytes"] or 0 for row in nodes) or 1
 
+        tunnels = telemetry.usage_by_tunnel(days)
+        names = telemetry.profile_names() if tunnels else {}
+        per_user_tunnels = telemetry.tunnels_by_user(days, [row["user"].pk for row in users])
+        tunnel_total = sum(row["connections"] for row in tunnels) or 1
+
+        def tunnel_name(row) -> str:
+            key = (row["node_name"], row["inbound_tag"], row["via_relay"])
+            if key in names:
+                return names[key]
+            # Названия не доехали — показываем техническое, но не врём про маршрут.
+            suffix = " (через РФ)" if row["via_relay"] else ""
+            return f"{row['inbound_tag']} @ {row['node_name']}{suffix}"
+
         context = {
             **self.admin_site.each_context(request),
             "title": "Использование туннелей",
             "days": days,
             "periods": (1, 7, 30),
+            "tunnels": [
+                {
+                    "name": tunnel_name(row),
+                    "tag": row["inbound_tag"],
+                    "node": row["node_name"],
+                    "via_relay": row["via_relay"],
+                    "users": row["users"],
+                    "connections": row["connections"],
+                    "share": round(100 * row["connections"] / tunnel_total),
+                }
+                for row in tunnels
+            ],
             "nodes": [
                 {
                     "name": row["node_name"] or "неизвестно",
@@ -204,6 +230,10 @@ class UsageDashboardAdmin(admin.ModelAdmin):
                     "bytes": human_bytes(row["bytes"]),
                     "nodes": ", ".join(
                         f"{name or 'неизвестно'} ({human_bytes(value)})" for name, value in row["nodes"]
+                    ),
+                    "tunnels": ", ".join(
+                        f"{tunnel_name(item)} ×{item['connections']}"
+                        for item in per_user_tunnels.get(row["user"].pk, [])
                     ),
                     "online_at": row["online_at"],
                     "current_node": row["current_node"],
@@ -240,6 +270,13 @@ class PanelPresenceAdmin(admin.ModelAdmin):
 class NodeUsageDayAdmin(admin.ModelAdmin):
     list_display = ("date", "node_name", "user", "bytes", "samples")
     list_filter = ("node_name", "date")
+    search_fields = ("user__username", "user__pk")
+
+
+@admin.register(InboundUsageDay)
+class InboundUsageDayAdmin(admin.ModelAdmin):
+    list_display = ("date", "inbound_tag", "node_name", "via_relay", "user", "connections", "last_seen")
+    list_filter = ("inbound_tag", "node_name", "via_relay", "date")
     search_fields = ("user__username", "user__pk")
 
 

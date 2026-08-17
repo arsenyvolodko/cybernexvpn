@@ -499,8 +499,8 @@ class NodeUsageDay(models.Model):
     только на тот трафик, что прошёл после смены ноды внутри одного интервала.
 
     Разбивки по инбаундам, то есть по конкретным туннелям, панель не отдаёт —
-    видно только ноду. На eu1 и ru1 у нас по три профиля, так что до
-    «какой именно туннель» нужна статистика с самих нод.
+    видно только ноду. За «какой именно туннель» отвечает `InboundUsageDay`,
+    который собирается уже не из панели, а с самих нод.
     """
 
     user = models.ForeignKey(NexUser, on_delete=models.CASCADE, related_name="node_usage")
@@ -522,6 +522,50 @@ class NodeUsageDay(models.Model):
 
     def __str__(self):
         return f"{self.date} {self.node_name}: {self.bytes} Б"
+
+
+class InboundUsageDay(models.Model):
+    """Сколько раз человек поднимал конкретный туннель за сутки.
+
+    Байт здесь нет и быть не может. Xray ведёт два независимых счётчика —
+    `user>>>...>>>traffic` и `inbound>>>...>>>traffic` — и никогда их не
+    перемножает: величины «сколько байт этот человек прокачал через этот
+    туннель» не существует ни в панели, ни в самом Xray. Зато access log
+    пишет строку на каждое соединение, и в ней есть и тег инбаунда, и id
+    пользователя в панели. Поэтому активность меряем соединениями.
+
+    `via_relay` — соединение пришло на ноду с адреса московского релея. Это
+    профили «через РФ»: точка входа российская, выход всё равно европейский.
+    Без этого признака «🇷🇺 Альтернативный» неотличим от «🛡 Стабильный» —
+    инбаунд у них один и тот же, разные только адрес и порт в подписке.
+
+    Счётчик за день **абсолютный**, а не приращение: нода каждый раз
+    пересчитывает сутки по логу целиком и присылает итог. Лог маленький
+    (десятки килобайт в сутки), зато повторная доставка и пропущенный запуск
+    перестают что-либо значить.
+    """
+
+    user = models.ForeignKey(NexUser, on_delete=models.CASCADE, related_name="inbound_usage")
+    node_name = models.CharField(max_length=63)
+    inbound_tag = models.CharField(max_length=63)
+    via_relay = models.BooleanField(default=False)
+    date = models.DateField()
+    connections = models.PositiveIntegerField(default=0)
+    last_seen = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "туннель по дням"
+        verbose_name_plural = "Использование по туннелям"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "node_name", "inbound_tag", "via_relay", "date"],
+                name="unique_user_inbound_day",
+            )
+        ]
+        indexes = [models.Index(fields=["date", "inbound_tag"])]
+
+    def __str__(self):
+        return f"{self.date} {self.inbound_tag}@{self.node_name}: {self.connections}"
 
 
 class UsageDashboard(NodeUsageDay):
