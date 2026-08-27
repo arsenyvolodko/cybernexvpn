@@ -256,7 +256,8 @@ Configuration.configure_auth_token(YOOKASSA_OAUTH_TOKEN)
 # У SDK ЮKassa нет своего таймаута запроса: `Configuration.timeout` — это
 # пауза между повторами, а само обращение уходит без ограничения. Без этого
 # при обрыве связи вызов висит минутами, и человек в боте видит, что «ничего
-# не происходит». Значение используем и в сверке платежей.
+# не происходит». Значение используем и в сверке платежей, и в самом SDK —
+# туда оно доезжает через `nexvpn.yookassa_client.install`, см. `NexvpnConfig.ready`.
 YOOKASSA_TIMEOUT = env.int("YOOKASSA_TIMEOUT", 20)
 
 # Диапазоны, с которых YooKassa шлёт уведомления.

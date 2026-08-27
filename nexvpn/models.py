@@ -611,11 +611,23 @@ class Broadcast(models.Model):
         verbose_name="Только администратору",
         help_text="Проверочная отправка на TG_ADMIN_USER_ID, остальных не трогаем",
     )
+    # Составлено в боте, а не в админке. Храним только ссылку на оригинал в
+    # чате администратора: рассылка идёт через `copy_message`, и Telegram сам
+    # переносит вложение, подпись и разметку. Складывать у себя файлы и
+    # разбирать десяток типов вложений не приходится, а получатель видит ровно
+    # то же, что автор видел в предпросмотре.
+    source_chat_id = models.BigIntegerField(null=True, blank=True, default=None)
+    source_message_id = models.BigIntegerField(null=True, blank=True, default=None)
     sent_count = models.PositiveIntegerField(default=0)
     failed_count = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
+
+    @property
+    def is_copied(self) -> bool:
+        """Рассылка-копия: текст берётся не из `text`, а из исходного сообщения."""
+        return self.source_chat_id is not None and self.source_message_id is not None
 
     class Meta:
         verbose_name = "рассылка"

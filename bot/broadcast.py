@@ -93,15 +93,32 @@ def keyboard_for(broadcast: Broadcast):
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
 
 
-async def _send_one(bot, chat_id: int, text: str, keyboard) -> tuple[bool, str]:
+async def _deliver(bot, chat_id: int, broadcast: Broadcast, keyboard):
+    """Одна отправка. Способ зависит от того, откуда взялось сообщение.
+
+    Составленное в боте копируем: `copy_message` переносит вложение, подпись и
+    разметку как есть, без пометки «переслано». Написанное в админке — обычный
+    текст.
+    """
+    if broadcast.is_copied:
+        return await bot.copy_message(
+            chat_id=chat_id,
+            from_chat_id=broadcast.source_chat_id,
+            message_id=broadcast.source_message_id,
+            reply_markup=keyboard,
+        )
+    return await bot.send_message(chat_id, broadcast.text, reply_markup=keyboard)
+
+
+async def _send_one(bot, chat_id: int, broadcast: Broadcast, keyboard) -> tuple[bool, str]:
     try:
-        await bot.send_message(chat_id, text, reply_markup=keyboard)
+        await _deliver(bot, chat_id, broadcast, keyboard)
         return True, ""
     except TelegramRetryAfter as exc:
         # Просят подождать — ждём и пробуем ещё раз, это штатная ситуация.
         await asyncio.sleep(exc.retry_after + 1)
         try:
-            await bot.send_message(chat_id, text, reply_markup=keyboard)
+            await _deliver(bot, chat_id, broadcast, keyboard)
             return True, ""
         except TelegramAPIError as retry_exc:
             return False, str(retry_exc)[:250]
@@ -125,7 +142,7 @@ async def run(bot, broadcast_id: int) -> dict:
     sent = failed = 0
 
     for user in targets:
-        delivered, error = await _send_one(bot, user.pk, broadcast.text, keyboard)
+        delivered, error = await _send_one(bot, user.pk, broadcast, keyboard)
         await sync_to_async(BroadcastDelivery.objects.update_or_create)(
             broadcast=broadcast,
             user=user,

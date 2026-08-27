@@ -31,3 +31,16 @@ class PlanCallback(CallbackData, prefix="plan"):
 
 class FaqCallback(CallbackData, prefix="faq"):
     topic: str
+
+
+class BroadcastCallback(CallbackData, prefix="bc"):
+    """Подтверждение рассылки, составленной в боте.
+
+    Идентификатор черновика — прямо в кнопке, а не в FSM: любое нажатие кнопки
+    сбрасывает состояние (см. `StateResetMiddleware`), да и подтверждать
+    отправку трёмстам людям по «висящему» состоянию опасно — кнопка должна
+    работать ровно с тем черновиком, под которым её показали.
+    """
+
+    broadcast_id: int
+    action: str  # send | drop

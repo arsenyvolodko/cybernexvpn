@@ -215,3 +215,77 @@ def test_everyone_blocked_counts_as_failure():
 
     item.refresh_from_db()
     assert item.status == BroadcastStatusEnum.FAILED
+
+
+# --- рассылка, составленная в боте ---
+
+
+class CopyingBot(FakeBot):
+    """Бот, умеющий и копировать. Копии считаем отдельно от обычных отправок."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.copied: list[tuple[int, int, int]] = []
+
+    async def copy_message(self, chat_id, from_chat_id, message_id, reply_markup=None):
+        self.attempts[chat_id] = self.attempts.get(chat_id, 0) + 1
+        if chat_id in self.fail_for:
+            raise TelegramForbiddenError(method=None, message="bot was blocked by the user")
+        if chat_id in self.retry_once_for and self.attempts[chat_id] == 1:
+            raise TelegramRetryAfter(method=None, message="Too Many Requests", retry_after=0)
+        self.copied.append((chat_id, from_chat_id, message_id))
+
+
+def test_broadcast_with_attachment_is_copied_not_retyped():
+    """Сообщение с вложением уходит копией: пересобрать его текстом нельзя."""
+    user = NexUserFactory()
+    broadcast = make_broadcast(source_chat_id=777, source_message_id=42)
+    bot = CopyingBot()
+
+    async_to_sync(broadcast_module.run)(bot, broadcast.pk)
+
+    assert bot.copied == [(user.pk, 777, 42)]
+    assert bot.sent == []  # обычной отправки быть не должно
+
+
+def test_plain_broadcast_still_goes_as_text():
+    """Рассылка из админки не должна пострадать от появления копий."""
+    user = NexUserFactory()
+    broadcast = make_broadcast()
+    bot = CopyingBot()
+
+    async_to_sync(broadcast_module.run)(bot, broadcast.pk)
+
+    assert bot.sent == [user.pk]
+    assert bot.copied == []
+
+
+def test_copied_broadcast_survives_blocked_user():
+    """Блокировка одного не должна останавливать копирование остальным."""
+    blocked = NexUserFactory()
+    fine = NexUserFactory()
+    broadcast = make_broadcast(source_chat_id=1, source_message_id=2)
+    bot = CopyingBot(fail_for=[blocked.pk])
+
+    result = async_to_sync(broadcast_module.run)(bot, broadcast.pk)
+
+    assert [chat for chat, _, _ in bot.copied] == [fine.pk]
+    assert result == {"sent": 1, "failed": 1}
+    delivery = BroadcastDelivery.objects.get(broadcast=broadcast, user=blocked)
+    assert delivery.is_delivered is False
+    assert "заблокирован" in delivery.error
+
+
+def test_repeat_sends_only_to_those_who_missed_it():
+    """Повтор копии докидывает недошедшим, а дошедших не беспокоит второй раз."""
+    blocked = NexUserFactory()
+    fine = NexUserFactory()
+    broadcast = make_broadcast(source_chat_id=1, source_message_id=2)
+
+    async_to_sync(broadcast_module.run)(CopyingBot(fail_for=[blocked.pk]), broadcast.pk)
+
+    second = CopyingBot()
+    async_to_sync(broadcast_module.run)(second, broadcast.pk)
+
+    assert [chat for chat, _, _ in second.copied] == [blocked.pk]
+    assert fine.pk not in [chat for chat, _, _ in second.copied]
