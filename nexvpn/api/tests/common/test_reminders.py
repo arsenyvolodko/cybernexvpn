@@ -11,7 +11,7 @@ from django.utils.timezone import now
 from bot.notifications import due_reminders
 from nexvpn.api.tests.factories import PlanFactory, SubscriptionFactory
 from nexvpn.enums import SubscriptionEventReasonEnum
-from nexvpn.models import SentReminder, Subscription
+from nexvpn.models import SentReminder, Subscription, SubscriptionEvent
 from nexvpn.subscription import service
 
 pytestmark = pytest.mark.django_db
@@ -123,3 +123,63 @@ def test_renewal_resets_reminders(plan):
     service.grant_days(subscription.user, 30, SubscriptionEventReasonEnum.PURCHASE)
 
     assert not SentReminder.objects.filter(subscription=subscription).exists()
+
+
+# --- пробный период ---
+
+
+def granted_as(subscription: Subscription, reason: str) -> Subscription:
+    """Отметить, каким событием выдан текущий период подписки."""
+    SubscriptionEvent.objects.create(
+        user=subscription.user,
+        subscription=subscription,
+        reason=reason,
+        delta_days=3,
+        plan=subscription.plan,
+        price_month=subscription.plan.price_month,
+    )
+    return subscription
+
+
+@override_settings(SUBSCRIPTION_REMINDER_HOURS=OFFSETS, TRIAL_REMINDER_MAX_HOURS=24)
+def test_fresh_trial_gets_no_reminder(plan):
+    """Главный случай: пробный на 3 дня короче смещения «за неделю».
+
+    Без потолка «за 168 ч» считалось сработавшим с первой секунды, и человек
+    получал «Подписка заканчивается» через минуту после регистрации.
+    """
+    granted_as(expiring_in(24 * 3, plan), SubscriptionEventReasonEnum.TRIAL)
+
+    assert due_reminders() == []
+
+
+@override_settings(SUBSCRIPTION_REMINDER_HOURS=OFFSETS, TRIAL_REMINDER_MAX_HOURS=24)
+def test_trial_is_reminded_a_day_before(plan):
+    """Потолок не отменяет напоминания, а сдвигает первое на сутки до конца."""
+    subscription = granted_as(expiring_in(20, plan), SubscriptionEventReasonEnum.TRIAL)
+
+    due = due_reminders()
+
+    assert len(due) == 1 and due[0][0].pk == subscription.pk and due[0][1] == 24
+
+
+@override_settings(SUBSCRIPTION_REMINDER_HOURS=OFFSETS, TRIAL_REMINDER_MAX_HOURS=24)
+def test_paid_subscription_keeps_the_week_offset(plan):
+    """Контроль: тот же остаток, но период не пробный — «за неделю» работает."""
+    granted_as(expiring_in(24 * 3, plan), SubscriptionEventReasonEnum.PURCHASE)
+
+    due = due_reminders()
+
+    assert len(due) == 1 and due[0][1] == 168
+
+
+@override_settings(SUBSCRIPTION_REMINDER_HOURS=OFFSETS, TRIAL_REMINDER_MAX_HOURS=24)
+def test_purchase_after_trial_lifts_the_cap(plan):
+    """Купил после пробного — период уже оплаченный, потолок снимается."""
+    subscription = expiring_in(24 * 3, plan)
+    granted_as(subscription, SubscriptionEventReasonEnum.TRIAL)
+    granted_as(subscription, SubscriptionEventReasonEnum.PURCHASE)
+
+    due = due_reminders()
+
+    assert len(due) == 1 and due[0][1] == 168

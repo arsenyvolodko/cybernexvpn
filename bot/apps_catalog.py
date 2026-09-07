@@ -37,12 +37,6 @@ class PlatformGuide:
     title: str
     downloads: list[DownloadLink]
     install_hint: str
-    connect_hint: str
-
-
-_APPLE_CONNECT = (
-    "Обрати внимание на список серверов в приложении. Они все разные и по-разному работают в зависимости от подключения (wifi/сотовые данные), операторов, регионов и тд. Подбери тот, который будет лучше всего работать именно у тебя)"
-)
 
 CATALOG: dict[Platform, PlatformGuide] = {
     Platform.IOS: PlatformGuide(
@@ -61,7 +55,6 @@ CATALOG: dict[Platform, PlatformGuide] = {
             "Если ты не меня регион в AppStore, то скачай приложение INCY.\n"
             "Если регион изменен, то приложение Happ.\n"
         ),
-        connect_hint=_APPLE_CONNECT,
     ),
     Platform.ANDROID: PlatformGuide(
         title="Android 🤖",
@@ -72,7 +65,6 @@ CATALOG: dict[Platform, PlatformGuide] = {
             ),
         ],
         install_hint="Поставь Happ из Google Play и запусти его.",
-        connect_hint="Обрати внимание на список серверов в приложении. Они все разные и по-разному работают в зависимости от подключения (wifi/сотовые данные), операторов, регионов и тд. Подбери тот, который будет лучше всего работать именно у тебя)"
     ),
     Platform.MACOS: PlatformGuide(
         title="Mac 💻",
@@ -92,7 +84,6 @@ CATALOG: dict[Platform, PlatformGuide] = {
             "не зависит от региона App Store. Если аккаунт не российский, можно "
             "поставить из магазина."
         ),
-        connect_hint=_APPLE_CONNECT,
     ),
     Platform.WINDOWS: PlatformGuide(
         title="Windows 🖥",
@@ -110,7 +101,6 @@ CATALOG: dict[Platform, PlatformGuide] = {
             "Скачай установщик и запусти его. Если Windows предупредит о неизвестном "
             "издателе — «Подробнее» → «Выполнить в любом случае»."
         ),
-        connect_hint="Открой Happ и нажми кнопку подключения. Сервер выбирается в списке.",
     ),
 }
 

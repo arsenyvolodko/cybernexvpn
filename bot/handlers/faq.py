@@ -27,5 +27,5 @@ async def handle_topic(call: CallbackQuery, callback_data: FaqCallback) -> None:
         await render(call, texts.FAQ, keyboards.faq(TOPICS))
         return
     await call.answer()
-    await render(call, topic.body, keyboards.faq_section())
+    await render(call, topic.body, keyboards.faq_section(), photo=topic.photo)
 

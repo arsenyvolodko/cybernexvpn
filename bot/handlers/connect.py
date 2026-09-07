@@ -97,11 +97,10 @@ async def handle_add_subscription(call: CallbackQuery, callback_data: ConnectCal
     before = await list_devices(user)
     known_hwids = {device.hwid for device in before or []}
 
-    guide = get_guide(platform)
     screen = f"connect:{platform.value}:{call.message.message_id}"
     await render(
         call,
-        texts.CONNECT_ADD_SUBSCRIPTION.format(connect_hint=guide.connect_hint),
+        texts.CONNECT_ADD_SUBSCRIPTION,
         keyboards.platform_connect(
             platform, build_connect_url(platform, view.web_url), view.web_url
         ),

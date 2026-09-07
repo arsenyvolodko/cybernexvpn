@@ -31,6 +31,7 @@ class ButtonsTextStorage(ABC):
     DOWNLOADED = "Скачал ✅"
     ADD_SUBSCRIPTION = "Добавить подписку ⚡"
     COPY_KEY = "Скопировать ключ 📋"
+    CONNECT_OK = "Хорошо"
 
     # рефералка и поддержка
     SHARE_REFERRAL = "Поделиться ссылкой 📤"
@@ -66,6 +67,7 @@ class ButtonsStorage(metaclass=AutoNameButtonMeta):
     DOWNLOADED = Button()
     ADD_SUBSCRIPTION = Button()
     COPY_KEY = Button()
+    CONNECT_OK = Button(style="success")
 
     SHARE_REFERRAL = Button()
     SUPPORT = Button()

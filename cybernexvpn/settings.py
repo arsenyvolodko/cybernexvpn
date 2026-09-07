@@ -331,6 +331,12 @@ SUBSCRIPTION_REMINDER_HOURS = env.list(
     "SUBSCRIPTION_REMINDER_HOURS", cast=int, default=[168, 48, 24, 12, 6, 2, 1]
 )
 
+# Потолок смещений на пробном периоде. Пробный короче самого дальнего смещения
+# (3 дня против недели), и без потолка «за неделю» считалось пройденным сразу
+# после выдачи: человек получал «Подписка заканчивается» через минуту после
+# регистрации. Смещения длиннее потолка на пробном не шлём вовсе.
+TRIAL_REMINDER_MAX_HOURS = env.int("TRIAL_REMINDER_MAX_HOURS", 24)
+
 # Пробный период для по-настоящему новых пользователей.
 TRIAL_DAYS = env.int("TRIAL_DAYS", 3)
 TRIAL_PLAN_DEVICES = env.int("TRIAL_PLAN_DEVICES", 3)

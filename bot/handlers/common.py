@@ -8,9 +8,10 @@
 """
 
 import logging
+from pathlib import Path
 
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, FSInputFile, InlineKeyboardMarkup, Message
 
 from bot.screen_state import mark_screen
 
@@ -33,6 +34,27 @@ async def try_delete(message: Message) -> bool:
         return False
 
 
+async def _send_screen(
+    message: Message,
+    text: str,
+    keyboard: InlineKeyboardMarkup | None,
+    photo: Path | None,
+) -> Message:
+    """Отправить экран новым сообщением — с картинкой, если она есть.
+
+    Не вышло с картинкой — шлём текстом. Экран без иллюстрации хуже, чем с ней,
+    но несопоставимо лучше, чем отсутствие экрана.
+    """
+    if photo is not None and photo.exists():
+        try:
+            return await message.answer_photo(
+                FSInputFile(photo), caption=text, reply_markup=keyboard
+            )
+        except Exception:
+            logger.warning("Не отправилась картинка экрана — показываем текстом", exc_info=True)
+    return await message.answer(text, reply_markup=keyboard)
+
+
 async def render(
     event: Message | CallbackQuery,
     text: str,
@@ -40,6 +62,7 @@ async def render(
     *,
     force_new: bool = False,
     screen: str | None = None,
+    photo: Path | None = None,
 ) -> int | None:
     """Отрисовать экран и вернуть id сообщения, в котором он оказался.
 
@@ -51,7 +74,7 @@ async def render(
     """
     if isinstance(event, Message):
         mark_screen(event.chat.id, screen)
-        sent = await event.answer(text, reply_markup=keyboard)
+        sent = await _send_screen(event, text, keyboard, photo)
         return sent.message_id
 
     message = event.message
@@ -59,7 +82,14 @@ async def render(
         return None
     mark_screen(message.chat.id, screen)
 
-    can_edit = not force_new and not (message.photo or message.document or message.video)
+    # Экран с картинкой всегда уезжает в новое сообщение: текстовое сообщение
+    # правкой в сообщение с фото не превратить, `editMessageMedia` работает
+    # только там, где медиа уже было.
+    can_edit = (
+        not force_new
+        and photo is None
+        and not (message.photo or message.document or message.video)
+    )
     if can_edit:
         try:
             await message.edit_text(text, reply_markup=keyboard)
@@ -74,6 +104,6 @@ async def render(
     # нам пропавшего экрана: в тексте была битая разметка, правка не прошла,
     # сообщение удалилось, отправка упала на той же разметке — и у человека
     # осталась пустота вместо меню. Пусть лучше мелькнёт дубль.
-    sent = await message.answer(text, reply_markup=keyboard)
+    sent = await _send_screen(message, text, keyboard, photo)
     await try_delete(message)
     return sent.message_id

@@ -21,7 +21,9 @@
 import asyncio
 import logging
 
-from bot import texts
+from aiogram.types import FSInputFile
+
+from bot import media, texts
 from bot.screen_state import is_current_screen
 from bot.keyboards import keyboards
 from bot.services import Device, claim_connection_watch, list_devices
@@ -34,12 +36,40 @@ POLL_TIMEOUT_SECONDS = 180
 
 
 async def announce_connected(bot, chat_id: int, message_id: int, device: Device) -> None:
-    """Сообщить, что устройство на связи. Точка входа и для поллинга, и для вебхука."""
+    """Сообщить, что устройство на связи. Точка входа и для поллинга, и для вебхука.
+
+    Экран «Шаг 2 из 2» заменяется новым сообщением с картинкой, а не правится.
+    Так приходится делать потому, что Bot API не умеет превращать текстовое
+    сообщение в сообщение с фото: `editMessageMedia` работает только там, где
+    медиа уже было. Порядок — сначала отправить, потом удалить старое: если
+    отправка сорвётся, человек останется хотя бы со старым экраном.
+    """
+    caption = texts.CONNECT_SUCCESS.format(device=device.title)
+
+    if len(caption) <= media.CAPTION_LIMIT and media.CONNECT_SUCCESS_PHOTO.exists():
+        try:
+            await bot.send_photo(
+                chat_id=chat_id,
+                photo=FSInputFile(media.CONNECT_SUCCESS_PHOTO),
+                caption=caption,
+                reply_markup=keyboards.connected(),
+            )
+        except Exception:
+            logger.warning("Не отправилось фото подключения — шлём текстом", exc_info=True)
+        else:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=message_id)
+            except Exception:
+                # Не удалилось — над картинкой останется висеть «Шаг 2 из 2».
+                # Некрасиво, но не сломано, и это не повод ничего не показывать.
+                logger.debug("Старый экран подключения не удалился", exc_info=True)
+            return
+
     try:
         await bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
-            text=texts.CONNECT_SUCCESS.format(device=device.title),
+            text=caption,
             reply_markup=keyboards.connected(),
         )
     except Exception:

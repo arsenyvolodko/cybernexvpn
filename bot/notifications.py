@@ -18,7 +18,8 @@ from django.utils.timezone import localtime, now
 
 from bot import texts
 from bot.keyboards import keyboards
-from nexvpn.models import SentReminder, Subscription
+from nexvpn.enums import SubscriptionEventReasonEnum
+from nexvpn.models import SentReminder, Subscription, SubscriptionEvent
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ def due_reminders() -> list[tuple[Subscription, int]]:
     moment = now()
     horizon = moment + _timedelta_hours(max(offsets))
 
-    subscriptions = (
+    subscriptions = list(
         Subscription.objects
         .filter(expires_at__gt=moment, expires_at__lte=horizon)
         .select_related("user", "plan")
@@ -49,11 +50,13 @@ def due_reminders() -> list[tuple[Subscription, int]]:
         (subscription_id, hours)
         for subscription_id, hours in SentReminder.objects.values_list("subscription_id", "hours_before")
     }
+    trial_subscriptions = _trial_subscription_ids(subscriptions)
 
     result: list[tuple[Subscription, int]] = []
     for subscription in subscriptions:
         hours_left = (subscription.expires_at - moment).total_seconds() / 3600
-        candidates = [offset for offset in offsets if hours_left <= offset]
+        applicable = _offsets_for(subscription, offsets, trial_subscriptions)
+        candidates = [offset for offset in applicable if hours_left <= offset]
         if not candidates:
             continue
         # Самое близкое смещение — оно точнее описывает текущий момент.
@@ -62,6 +65,46 @@ def due_reminders() -> list[tuple[Subscription, int]]:
             continue
         result.append((subscription, closest))
     return result
+
+
+def _offsets_for(subscription: Subscription, offsets: list[int], trial_ids: set[int]) -> list[int]:
+    """Какие смещения вообще применимы к этой подписке.
+
+    На пробном периоде смещения длиннее `TRIAL_REMINDER_MAX_HOURS` отбрасываются.
+    Причина в том, что смещение считается сработавшим, когда до конца осталось
+    меньше него, — а у трёхдневного пробного «за неделю» выполняется с первой
+    секунды. Без этого фильтра человек получал «Подписка заканчивается» через
+    минуту после регистрации, и это была не редкость, а поведение по умолчанию.
+    """
+    if subscription.pk not in trial_ids:
+        return offsets
+    return [offset for offset in offsets if offset <= settings.TRIAL_REMINDER_MAX_HOURS]
+
+
+def _trial_subscription_ids(subscriptions: list[Subscription]) -> set[int]:
+    """Подписки, текущий период которых выдан как пробный.
+
+    Смотрим на **последнее** событие: пробный, за которым последовала покупка,
+    пробным больше не считается — там уже оплаченный период обычной длины.
+    """
+    if not subscriptions:
+        return set()
+
+    latest_reason: dict[int, str] = {}
+    rows = (
+        SubscriptionEvent.objects
+        .filter(subscription_id__in=[subscription.pk for subscription in subscriptions])
+        .order_by("subscription_id", "-created_at", "-id")
+        .values_list("subscription_id", "reason")
+    )
+    for subscription_id, reason in rows:
+        latest_reason.setdefault(subscription_id, reason)
+
+    return {
+        subscription_id
+        for subscription_id, reason in latest_reason.items()
+        if reason == SubscriptionEventReasonEnum.TRIAL
+    }
 
 
 def _timedelta_hours(hours: int):
