@@ -92,3 +92,33 @@ def test_button_texts_are_unique():
     ]
     duplicates = {text for text in texts if texts.count(text) > 1}
     assert not duplicates, f"Повторяющиеся подписи: {duplicates}"
+
+
+def test_connect_button_keeps_its_style():
+    """Кнопка-ссылка легко теряет стиль.
+
+    Она собирается не из `Button.get_button()`, а вручную из текста — и тогда
+    объявленный у кнопки `style` до Telegram не доезжает, кнопка молча остаётся
+    серой. Проверяем не объявление, а то, что реально уходит в клавиатуре.
+    """
+    from bot.apps_catalog import Platform
+    from bot.keyboards import keyboards
+    from bot.keyboards.storage import ButtonsStorage
+
+    keyboard = keyboards.platform_connect(
+        Platform.IOS, "https://happ.su/add/abc", "https://sub-nex.com/abc"
+    )
+
+    buttons = [button for row in keyboard.inline_keyboard for button in row]
+    connect = next(b for b in buttons if b.text == ButtonsStorage.ADD_SUBSCRIPTION.text)
+    assert connect.style == "success"
+    assert connect.url, "это кнопка-ссылка, она должна вести в приложение"
+
+
+def test_the_screen_text_names_the_button_that_exists():
+    """Текст просит «нажми ...» — имя должно совпадать с кнопкой на экране."""
+    from bot import texts
+    from bot.keyboards.storage import ButtonsStorage
+
+    name = ButtonsStorage.ADD_SUBSCRIPTION.text.split()[0]
+    assert f"«{name}»" in texts.CONNECT_ADD_SUBSCRIPTION

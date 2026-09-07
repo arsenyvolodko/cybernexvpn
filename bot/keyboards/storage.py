@@ -29,9 +29,9 @@ class ButtonsTextStorage(ABC):
 
     # подключение
     DOWNLOADED = "Скачал ✅"
-    ADD_SUBSCRIPTION = "Добавить подписку ⚡"
+    ADD_SUBSCRIPTION = "Подключить ⚡"
     COPY_KEY = "Скопировать ключ 📋"
-    CONNECT_OK = "Хорошо"
+    CONNECT_OK = "Хорошо 👌"
 
     # рефералка и поддержка
     SHARE_REFERRAL = "Поделиться ссылкой 📤"
@@ -65,9 +65,13 @@ class ButtonsStorage(metaclass=AutoNameButtonMeta):
     DELETE_DEVICE_CONFIRM = Button(style="danger")
 
     DOWNLOADED = Button()
-    ADD_SUBSCRIPTION = Button()
+    # Зелёная, как «Подключиться» в меню: это то же главное действие, только
+    # на шаг ближе — им сценарий подключения и заканчивается.
+    ADD_SUBSCRIPTION = Button(style="success")
     COPY_KEY = Button()
-    CONNECT_OK = Button(style="success")
+    # Обычная, не зелёная: зелёным в боте выделены действия, которые чего-то
+    # стоят или ведут дальше по сценарию, а это просто «прочитал».
+    CONNECT_OK = Button()
 
     SHARE_REFERRAL = Button()
     SUPPORT = Button()

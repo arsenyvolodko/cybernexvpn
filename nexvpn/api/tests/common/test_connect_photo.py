@@ -145,9 +145,12 @@ def test_the_keyboard_is_a_single_ok_button():
 
     keyboard = keyboards.connected()
 
+    from bot.keyboards.storage import ButtonsStorage
+
     buttons = [button for row in keyboard.inline_keyboard for button in row]
     assert len(buttons) == 1
-    assert buttons[0].text == "Хорошо"
+    assert buttons[0].text == ButtonsStorage.CONNECT_OK.text
+    assert buttons[0].text.startswith("Хорошо")
 
 
 def test_the_ok_button_is_handled():

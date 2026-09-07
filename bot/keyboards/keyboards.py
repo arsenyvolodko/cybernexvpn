@@ -164,7 +164,9 @@ def platform_connect(platform: Platform, connect_url: str, subscription_url: str
     """«Скопировать ключ» — штатная кнопка Telegram: копирует в буфер по нажатию,
     без отдельного сообщения с текстом ключа."""
     return _rows(
-        InlineKeyboardButton(text=ButtonsStorage.ADD_SUBSCRIPTION.text, url=connect_url),
+        # Через get_button, а не руками: иначе объявленный у кнопки стиль
+        # (зелёная) до Telegram не доедет.
+        ButtonsStorage.ADD_SUBSCRIPTION.get_button(url=connect_url),
         InlineKeyboardButton(
             text=ButtonsStorage.COPY_KEY.text,
             copy_text=CopyTextButton(text=subscription_url),
