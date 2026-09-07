@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дашборд — cybernexvpn</title>
+<style>
+  :root {
+    --bg: #f5f7fa; --card: #fff; --line: #e3e8ef; --ink: #16233a; --muted: #7a8699;
+    --accent: #12b886; --accent-soft: rgba(18,184,134,.12); --link: #2b6cb0; --warn: #d9480f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 20px 20px 60px; }
+
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+  header h1 { font-size: 19px; margin: 0; font-weight: 650; }
+  header .spacer { flex: 1; }
+  header .who { color: var(--muted); font-size: 13px; }
+
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
+  select, input[type=date], input[type=search] {
+    font: inherit; color: inherit; background: var(--card); border: 1px solid var(--line);
+    border-radius: 9px; padding: 8px 11px; outline: none; }
+  select:focus, input:focus { border-color: var(--accent); }
+  .dash { color: var(--muted); }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr)); gap: 10px; margin-bottom: 20px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 13px 15px; }
+  .card.click { cursor: pointer; }
+  .card.click:hover { border-color: #b9c4d4; }
+  .card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .card .t { color: var(--muted); font-size: 12.5px; margin-bottom: 6px; }
+  .card .v { font-size: 23px; font-weight: 660; letter-spacing: -.4px; }
+  .card .d { font-size: 12px; margin-top: 3px; color: var(--muted); }
+  .card .d.up { color: var(--accent); }
+  .card .d.down { color: var(--warn); }
+
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; margin-bottom: 18px; }
+  .panel h2 { font-size: 15px; margin: 0 0 2px; font-weight: 620; }
+  .panel .sub { color: var(--muted); font-size: 12.5px; margin-bottom: 10px; }
+  .panel .head { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+  .panel .head .spacer { flex: 1; }
+
+  svg.chart { width: 100%; height: 300px; display: block; touch-action: none; }
+  svg.chart .grid { stroke: #eef1f6; }
+  svg.chart .axis { fill: var(--muted); font-size: 11px; }
+  svg.chart .area { fill: var(--accent-soft); }
+  svg.chart .ln { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+  svg.chart .dot { fill: #fff; stroke: var(--accent); stroke-width: 2; }
+  svg.chart .hit { fill: transparent; cursor: pointer; }
+  svg.chart .cursor { stroke: #c3ccd9; }
+  .tip { position: absolute; background: #16233a; color: #fff; border-radius: 8px; padding: 7px 10px;
+         font-size: 12.5px; pointer-events: none; opacity: 0; transition: opacity .1s; white-space: nowrap; }
+  .tip b { font-size: 14px; display: block; }
+  .tip i { color: #9fb0c9; font-style: normal; font-size: 11.5px; }
+
+  .chips { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 12px; }
+  .chip { border: 1px solid var(--line); background: var(--card); border-radius: 999px;
+          padding: 6px 12px; cursor: pointer; font-size: 13px; }
+  .chip:hover { border-color: #b9c4d4; }
+  .chip.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .chip .n { opacity: .6; margin-left: 5px; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #f8fafc; }
+  td.num, th.num { text-align: right; }
+  .tag { font-size: 11.5px; border-radius: 5px; padding: 2px 6px; background: #eef1f6; color: var(--muted); }
+  .tag.ok { background: var(--accent-soft); color: #0b7a5a; }
+  .tag.no { background: #ffe8dd; color: var(--warn); }
+  .empty { color: var(--muted); padding: 18px 4px; }
+  .scroll { overflow-x: auto; }
+
+  dialog { border: none; border-radius: 14px; padding: 0; max-width: 720px; width: 92vw;
+           box-shadow: 0 20px 60px rgba(16,32,60,.28); }
+  dialog::backdrop { background: rgba(16,32,60,.35); }
+  .modal { padding: 20px 22px 24px; }
+  .modal h3 { margin: 0 0 2px; font-size: 17px; }
+  .modal .sub { color: var(--muted); font-size: 13px; margin-bottom: 14px; }
+  .modal h4 { font-size: 13px; color: var(--muted); margin: 16px 0 6px; font-weight: 600; }
+  .modal .close { position: absolute; top: 14px; right: 18px; cursor: pointer; color: var(--muted);
+                  font-size: 22px; line-height: 1; background: none; border: none; }
+  .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .kv div { background: #f8fafc; border-radius: 9px; padding: 8px 11px; }
+  .kv .t { color: var(--muted); font-size: 11.5px; }
+  .kv .v { font-weight: 600; margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Дашборд</h1>
+    <span class="spacer"></span>
+    <span class="who"><a href="/admin/">админка</a></span>
+  </header>
+
+  <div class="controls">
+    <select id="preset"></select>
+    <input type="date" id="from"><span class="dash">—</span><input type="date" id="to">
+    <select id="granularity">
+      <option value="day">Детализация: по дням</option>
+      <option value="week">Детализация: по неделям</option>
+      <option value="month">Детализация: по месяцам</option>
+    </select>
+  </div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="panel">
+    <div class="head">
+      <div>
+        <h2 id="chartTitle">—</h2>
+        <div class="sub" id="chartSub">Плитки сверху переключают, что нарисовано. Точка на графике — клик, чтобы увидеть платежи этого дня.</div>
+      </div>
+    </div>
+    <div style="position:relative">
+      <svg class="chart" id="chart"></svg>
+      <div class="tip" id="tip"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="head">
+      <div><h2>Платежи</h2><div class="sub" id="payHint">За выбранный период</div></div>
+      <span class="spacer"></span>
+      <select id="payMode">
+        <option value="paid">Только оплаченные</option>
+        <option value="all">Все попытки</option>
+      </select>
+    </div>
+    <div class="scroll"><table id="payTable"></table></div>
+  </div>
+
+  <div class="panel">
+    <div class="head">
+      <div><h2>Пользователи</h2><div class="sub" id="userHint">—</div></div>
+      <span class="spacer"></span>
+      <input type="search" id="q" placeholder="имя, @username или id">
+    </div>
+    <div class="chips" id="segments"></div>
+    <div class="scroll"><table id="userTable"></table></div>
+  </div>
+</div>
+
+<dialog id="modal"><button class="close" onclick="modal.close()">&times;</button><div class="modal" id="modalBody"></div></dialog>
+
+<script>
+const PRESETS = {{ presets|safe }};
+const SEGMENTS = {{ segments|safe }};
+const METRICS = {{ metrics|safe }};
+
+const PRESET_LABEL = { "1": "Сегодня", "7": "Последние 7 дней", "30": "Последние 30 дней",
+                       "90": "Последние 90 дней", "180": "Последние 180 дней", "365": "Последний год" };
+
+const state = { preset: "30", from: "", to: "", granularity: "day",
+                metric: "revenue", segment: "active", day: "", payMode: "paid", q: "" };
+
+const $ = (id) => document.getElementById(id);
+const fmtInt = (n) => (n ?? 0).toLocaleString("ru-RU");
+const fmtMoney = (n) => fmtInt(n) + " ₽";
+const fmtPercent = (n) => (n ?? 0) + " %";
+const fmtValue = (v, f) => f === "money" ? fmtMoney(v) : f === "percent" ? fmtPercent(v) : fmtInt(v);
+
+function fmtDate(iso, withTime) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const date = d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "2-digit" });
+  return withTime ? date + " " + d.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" }) : date;
+}
+function fmtBytes(n) {
+  if (!n) return "—";
+  const units = ["Б", "КБ", "МБ", "ГБ", "ТБ"];
+  let i = 0, v = n;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return v.toFixed(v < 10 && i > 0 ? 1 : 0) + " " + units[i];
+}
+function tgLink(row) {
+  if (!row.username) return row.name || ("id " + row.id);
+  return '<a href="https://t.me/' + row.username + '" target="_blank" rel="noopener">@' + row.username + "</a>";
+}
+
+function query(extra) {
+  const p = new URLSearchParams();
+  if (state.from && state.to) { p.set("from", state.from); p.set("to", state.to); }
+  else p.set("preset", state.preset);
+  p.set("granularity", state.granularity);
+  Object.entries(extra || {}).forEach(([k, v]) => { if (v) p.set(k, v); });
+  return p.toString();
+}
+async function api(path, extra) {
+  const res = await fetch(path + "?" + query(extra), { credentials: "same-origin" });
+  if (res.status === 403) { location.href = "/admin/login/?next=/dash/"; return null; }
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// ─── шапка ───
+PRESETS.forEach((p) => {
+  const o = document.createElement("option");
+  o.value = p; o.textContent = PRESET_LABEL[p] || (p + " дн.");
+  $("preset").append(o);
+});
+$("preset").value = state.preset;
+$("preset").onchange = (e) => {
+  state.preset = e.target.value; state.from = ""; state.to = "";
+  $("from").value = ""; $("to").value = ""; state.day = ""; reload();
+};
+const onDates = () => {
+  state.from = $("from").value; state.to = $("to").value;
+  if (state.from && state.to) { state.day = ""; reload(); }
+};
+$("from").onchange = onDates;
+$("to").onchange = onDates;
+$("granularity").onchange = (e) => { state.granularity = e.target.value; state.day = ""; reload(); };
+$("payMode").onchange = (e) => { state.payMode = e.target.value; loadPayments(); };
+let searchTimer;
+$("q").oninput = (e) => {
+  state.q = e.target.value;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(loadUsers, 250);
+};
+
+// ─── плитки ───
+function drawCards(cards) {
+  $("cards").innerHTML = "";
+  cards.forEach((c) => {
+    const el = document.createElement("div");
+    el.className = "card" + (c.metric ? " click" : "") + (c.metric === state.metric ? " on" : "");
+    el.title = c.hint || "";
+    let delta = "";
+    if (c.delta !== null && c.delta !== undefined) {
+      const dir = c.delta >= 0 ? "up" : "down";
+      delta = '<div class="d ' + dir + '">' + (c.delta >= 0 ? "+" : "") + c.delta + "% к прошлому периоду</div>";
+    }
+    el.innerHTML = '<div class="t">' + c.title + '</div><div class="v">' +
+                   fmtValue(c.value, c.format) + "</div>" + delta;
+    if (c.metric) el.onclick = () => { state.metric = c.metric; state.day = ""; reload(); };
+    $("cards").append(el);
+  });
+}
+
+// ─── график ───
+let chartData = null;
+
+function niceTicks(max) {
+  // Верхнее деление обязано быть НЕ НИЖЕ максимума: по нему считается масштаб,
+  // и если оно ниже, пик рисуется выше поля и обрезается верхней границей svg.
+  if (max <= 0) return [0, 1];
+  const raw = max / 4;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  let step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw) || mag * 10;
+  if (max <= 8) step = Math.max(1, Math.round(step));  // счётчики дробными не бывают
+  const top = Math.ceil(max / step) * step;
+  const ticks = [];
+  for (let v = 0; v <= top + step * 1e-6; v += step) ticks.push(Math.round(v * 1000) / 1000);
+  return ticks;
+}
+
+function drawChart(series) {
+  chartData = series;
+  $("chartTitle").textContent = series.title;
+  const svg = $("chart");
+  const W = svg.clientWidth || 900, H = 300;
+  const padL = 58, padR = 14, padT = 14, padB = 30;
+  const w = W - padL - padR, h = H - padT - padB;
+  const values = series.values;
+  const n = values.length;
+  const ticks = niceTicks(Math.max(...values, 0));
+  const maxY = ticks[ticks.length - 1] || 1;
+  const x = (i) => n === 1 ? padL + w / 2 : padL + (w * i) / (n - 1);
+  const y = (v) => padT + h - (h * v) / maxY;
+
+  let out = "";
+  ticks.forEach((t) => {
+    out += '<line class="grid" x1="' + padL + '" y1="' + y(t) + '" x2="' + (W - padR) + '" y2="' + y(t) + '"/>';
+    out += '<text class="axis" x="' + (padL - 8) + '" y="' + (y(t) + 4) + '" text-anchor="end">' + fmtInt(t) + "</text>";
+  });
+
+  if (n) {
+    const line = values.map((v, i) => (i ? "L" : "M") + x(i) + " " + y(v)).join(" ");
+    out += '<path class="area" d="' + line + " L" + x(n - 1) + " " + y(0) + " L" + x(0) + " " + y(0) + ' Z"/>';
+    out += '<path class="ln" d="' + line + '"/>';
+  }
+
+  const every = Math.max(1, Math.ceil(n / 12));
+  series.labels.forEach((label, i) => {
+    if (i % every === 0 || i === n - 1) {
+      out += '<text class="axis" x="' + x(i) + '" y="' + (H - 8) + '" text-anchor="middle">' + label + "</text>";
+    }
+  });
+
+  values.forEach((v, i) => {
+    if (n <= 60) out += '<circle class="dot" cx="' + x(i) + '" cy="' + y(v) + '" r="3"/>';
+    const half = n === 1 ? w / 2 : w / (n - 1) / 2;
+    out += '<rect class="hit" data-i="' + i + '" x="' + (x(i) - half) + '" y="' + padT +
+           '" width="' + (half * 2) + '" height="' + h + '"/>';
+  });
+  svg.innerHTML = out;
+
+  svg.querySelectorAll("rect.hit").forEach((r) => {
+    r.onmouseenter = () => showTip(+r.dataset.i, x(+r.dataset.i), y(values[+r.dataset.i]));
+    r.onclick = () => { state.day = series.dates[+r.dataset.i]; loadPayments(); };
+  });
+  svg.onmouseleave = () => { $("tip").style.opacity = 0; };
+}
+
+function showTip(i, px, py) {
+  const tip = $("tip");
+  const fmt = state.metric === "revenue" ? fmtMoney : fmtInt;
+  tip.innerHTML = "<b>" + fmt(chartData.values[i]) + "</b><i>" + chartData.labels[i] + "</i>";
+  tip.style.opacity = 1;
+  const box = $("chart").getBoundingClientRect();
+  tip.style.left = Math.min(Math.max(px - 40, 0), box.width - 120) + "px";
+  tip.style.top = Math.max(py - 56, 0) + "px";
+}
+window.addEventListener("resize", () => { if (chartData) drawChart(chartData); });
+
+// ─── таблицы ───
+function drawTable(el, columns, rows, onRow) {
+  if (!rows.length) { el.innerHTML = '<tbody><tr><td class="empty">Ничего нет</td></tr></tbody>'; return; }
+  const head = "<thead><tr>" + columns.map((c) =>
+    '<th class="' + (c.num ? "num" : "") + '">' + c.title + "</th>").join("") + "</tr></thead>";
+  const body = "<tbody>" + rows.map((row, i) => "<tr data-i=" + i + ">" + columns.map((c) =>
+    '<td class="' + (c.num ? "num" : "") + '">' + c.cell(row) + "</td>").join("") + "</tr>").join("") + "</tbody>";
+  el.innerHTML = head + body;
+  if (onRow) el.querySelectorAll("tbody tr").forEach((tr) => {
+    tr.onclick = (e) => { if (e.target.tagName !== "A") onRow(rows[+tr.dataset.i]); };
+  });
+}
+
+async function loadPayments() {
+  const data = await api("/dash/api/payments/", {
+    day: state.day, all: state.payMode === "all" ? "1" : "",
+  });
+  if (!data) return;
+  $("payHint").innerHTML = state.day
+    ? "За " + fmtDate(state.day) + ' · <a href="#" id="allDays">показать весь период</a>'
+    : "За выбранный период";
+  if (state.day) $("allDays").onclick = (e) => { e.preventDefault(); state.day = ""; loadPayments(); };
+  drawTable($("payTable"), [
+    { title: "Когда", cell: (r) => fmtDate(r.processed_at || r.created_at, true) },
+    { title: "Кто", cell: (r) => tgLink({ id: r.user_id, name: r.user_name, username: r.username }) },
+    { title: "Имя", cell: (r) => r.user_name || "—" },
+    { title: "Тариф", cell: (r) => r.plan || "—" },
+    { title: "Мес.", num: true, cell: (r) => r.months },
+    { title: "Сумма", num: true, cell: (r) => fmtMoney(r.amount) },
+    { title: "Статус", cell: (r) => r.paid ? '<span class="tag ok">оплачен</span>' : '<span class="tag no">не оплачен</span>' },
+  ], data.rows, (row) => row.user_id && openUser(row.user_id));
+}
+
+function drawSegments() {
+  $("segments").innerHTML = "";
+  Object.entries(SEGMENTS).forEach(([key, title]) => {
+    const el = document.createElement("div");
+    el.className = "chip" + (key === state.segment ? " on" : "");
+    el.textContent = title;
+    el.onclick = () => { state.segment = key; drawSegments(); loadUsers(); };
+    $("segments").append(el);
+  });
+}
+
+async function loadUsers() {
+  const data = await api("/dash/api/users/", { segment: state.segment, q: state.q });
+  if (!data) return;
+  $("userHint").textContent = data.title + " — " + data.rows.length +
+    (data.rows.length >= 200 ? " (показаны первые 200)" : "");
+  drawTable($("userTable"), [
+    { title: "Кто", cell: (r) => tgLink(r) },
+    { title: "Имя", cell: (r) => r.name || "—" },
+    { title: "Тариф", cell: (r) => r.plan || "—" },
+    { title: "Подписка до", cell: (r) => fmtDate(r.expires_at) +
+        (r.is_active ? "" : ' <span class="tag no">истекла</span>') },
+    { title: "Последний онлайн", cell: (r) => r.first_connected_at
+        ? fmtDate(r.online_at, true) : '<span class="tag no">не подключался</span>' },
+    { title: "Трафик", num: true, cell: (r) => fmtBytes(r.traffic) },
+    { title: "Заплатил", num: true, cell: (r) => r.spent ? fmtMoney(r.spent) : "—" },
+    { title: "Пришёл", cell: (r) => fmtDate(r.created_at) },
+  ], data.rows, (row) => openUser(row.id));
+}
+
+// ─── карточка ───
+async function openUser(id) {
+  const res = await fetch("/dash/api/users/" + id + "/", { credentials: "same-origin" });
+  if (!res.ok) return;
+  const u = await res.json();
+  const kv = (t, v) => '<div><div class="t">' + t + '</div><div class="v">' + v + "</div></div>";
+  let html = "<h3>" + (u.name || "Без имени") + " " + tgLink(u) + "</h3>" +
+    '<div class="sub">id ' + u.id + " · в базе с " + fmtDate(u.created_at) +
+    (u.is_legacy ? " · перенесён из старой версии" : "") + "</div>";
+  html += '<div class="kv">' +
+    kv("Тариф", u.plan || "—") +
+    kv("Подписка до", fmtDate(u.expires_at, true) + (u.is_active ? "" : " (истекла)")) +
+    kv("Первое подключение", fmtDate(u.first_connected_at)) +
+    kv("Последний онлайн", fmtDate(u.online_at, true)) +
+    kv("Всего трафика", fmtBytes(u.traffic)) +
+    kv("Всего заплатил", fmtMoney(u.spent)) +
+    kv("Пригласил", u.invited_count + " чел.") +
+    kv("Пришёл по ссылке", u.invited_by ? (u.invited_by.username ? "@" + u.invited_by.username : "id " + u.invited_by.id) : "—") +
+    "</div>";
+
+  if (u.payments.length) {
+    html += "<h4>Платежи</h4><div class='scroll'><table><tbody>" + u.payments.map((p) =>
+      "<tr><td>" + fmtDate(p.processed_at || p.created_at, true) + "</td><td>" + (p.plan || "—") +
+      "</td><td>" + p.months + " мес.</td><td class='num'>" + fmtMoney(p.amount) + "</td><td>" +
+      (p.paid ? '<span class="tag ok">оплачен</span>' : '<span class="tag no">не оплачен</span>') +
+      "</td></tr>").join("") + "</tbody></table></div>";
+  }
+  if (u.events.length) {
+    html += "<h4>Что происходило с подпиской</h4><div class='scroll'><table><tbody>" + u.events.map((e) =>
+      "<tr><td>" + fmtDate(e.created_at, true) + "</td><td>" + e.reason + "</td><td class='num'>" +
+      (e.days ? (e.days > 0 ? "+" : "") + e.days + " дн." : "—") + "</td><td class='num'>" +
+      (e.amount ? fmtMoney(e.amount) : "—") + "</td></tr>").join("") + "</tbody></table></div>";
+  }
+  if (u.usage.length) {
+    html += "<h4>Трафик по нодам</h4><div class='scroll'><table><tbody>" + u.usage.map((n) =>
+      "<tr><td>" + n.node + "</td><td class='num'>" + fmtBytes(n.bytes) + "</td></tr>").join("") +
+      "</tbody></table></div>";
+  }
+  $("modalBody").innerHTML = html;
+  $("modal").showModal();
+}
+
+// ─── запуск ───
+async function reload() {
+  const data = await api("/dash/api/overview/", { metric: state.metric });
+  if (!data) return;
+  $("from").value = data.period.from;
+  $("to").value = data.period.to;
+  $("granularity").value = data.period.granularity;
+  state.granularity = data.period.granularity;
+  drawCards(data.cards);
+  drawChart(data.series);
+  loadPayments();
+  loadUsers();
+}
+drawSegments();
+reload();
+</script>
+</body>
+</html>

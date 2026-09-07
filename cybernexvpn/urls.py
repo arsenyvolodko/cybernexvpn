@@ -20,10 +20,14 @@ from django.contrib import admin
 from django.urls import path, include
 
 from nexvpn.api.urls import urlpatterns as api_urls
+from nexvpn.dashboard.urls import urlpatterns as dashboard_urls
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/", include(api_urls)),
+    # Дашборд. Путь тот же, что был у прежней статической версии, чтобы не
+    # ломать закладку; отдаёт его теперь Django, а не nginx с диска.
+    path("dash/", include(dashboard_urls)),
 ]
 
 
