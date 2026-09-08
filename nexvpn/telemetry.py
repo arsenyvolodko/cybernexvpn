@@ -224,26 +224,41 @@ def record_inbound_usage(node_name: str, rows: list[dict]) -> IngestResult:
     `email` в access log — это числовой id пользователя **в панели**, тот же,
     что лежит в `Subscription.panel_user_id`. Через него и связываем: разбирать
     `tg_<id>` из имени не нужно.
+
+    Сеть (`asn`, `operator`, `network`) приходит уже разобранной: сборщик
+    разворачивает IP на ноде и присылает результат. Сырых адресов мы не
+    принимаем и не храним.
     """
     by_panel_id = dict(
         Subscription.objects.exclude(panel_user_id=None).values_list("panel_user_id", "user_id")
     )
     stored = unknown = 0
 
+    from nexvpn import networks
+
     for row in rows:
         user_id = by_panel_id.get(row.get("panel_user_id"))
         if user_id is None:
             unknown += 1
             continue
+        operator = (row.get("operator") or "")[:63]
         InboundUsageDay.objects.update_or_create(
             user_id=user_id,
             node_name=node_name,
             inbound_tag=row["inbound_tag"],
             via_relay=bool(row.get("via_relay")),
             date=row["date"],
+            # asn в ключе: за сутки человек бывает и дома, и на мобильном, и
+            # это разные строки. Остальные два поля из него выводятся, поэтому
+            # они в defaults — переписать название сети можно, ключ не тронув.
+            asn=int(row.get("asn") or 0),
             defaults={
                 "connections": row.get("connections") or 0,
                 "last_seen": _as_datetime(row.get("last_seen")),
+                "operator": operator,
+                # Тип сети считаем сами, а не берём у ноды: таблица сетей будет
+                # уточняться, и править её на пяти серверах не хочется.
+                "network": networks.classify(int(row.get("asn") or 0), operator),
             },
         )
         stored += 1
@@ -301,6 +316,20 @@ def tunnels_by_user(days: int = 7, user_ids: list[int] | None = None) -> dict[in
     return per_user
 
 
+def _host_inbound_uuid(host: dict) -> str | None:
+    """Достать из хоста ссылку на инбаунд.
+
+    Панель переехала: раньше это было плоское поле `inboundUuid`, теперь —
+    вложенное `inbound.configProfileInboundUuid`. Старое имя оставлено на
+    случай отката панели: оно ничего не стоит, а разница между «названия
+    профилей» и «технические теги» заметна не сразу.
+    """
+    nested = host.get("inbound")
+    if isinstance(nested, dict) and nested.get("configProfileInboundUuid"):
+        return nested["configProfileInboundUuid"]
+    return host.get("inboundUuid")
+
+
 def profile_names(client: RemnawaveClient | None = None) -> dict[tuple[str, str, bool], str]:
     """Как туннель называется для человека в подписке.
 
@@ -327,10 +356,21 @@ def profile_names(client: RemnawaveClient | None = None) -> dict[tuple[str, str,
     by_address: dict[tuple[str, str], list[str]] = {}
     tags = {inbound["uuid"]: inbound["tag"] for inbound in client.list_inbounds()}
     for host in hosts:
-        tag = tags.get(host.get("inboundUuid"))
+        tag = tags.get(_host_inbound_uuid(host))
         if not tag:
             continue
         by_address.setdefault((host.get("address", ""), tag), []).append(host.get("remark", ""))
+
+    if hosts and not by_address:
+        # Раньше это место молчало: панель переехала с `inboundUuid` на
+        # `inbound.configProfileInboundUuid`, сопоставление стало пустым, и
+        # статистика несколько недель показывала технические теги вместо
+        # названий, ничем не выдавая поломку. Пусть кричит.
+        logger.error(
+            "Ни один из %s хостов панели не сопоставился с инбаундом — "
+            "скорее всего, снова изменилась форма ответа",
+            len(hosts),
+        )
 
     names: dict[tuple[str, str, bool], str] = {}
     for node in nodes:

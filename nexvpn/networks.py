@@ -1,0 +1,80 @@
+"""Мобильная сеть или домашняя — по номеру автономной системы.
+
+Признака «я с телефона» нам никто не присылает: клиент такого не сообщает, а
+в IP это не записано. Единственная зацепка — чья это сеть. У Tele2, МегаФона
+и Yota мобильный трафик идёт из отдельных AS, и там вывод почти достоверен.
+У МТС и Билайна — нет: одна и та же компания раздаёт и мобильный, и домашний,
+иногда из соседних диапазонов. Поэтому цифра «мобильных столько-то» — оценка,
+и на дашборде подписана именно так.
+
+Таблица живёт здесь, а не в сборщике на ноде, намеренно: она будет устаревать
+и уточняться, а править её на пяти серверах ради переименования оператора —
+занятие на любителя. Ноды присылают номер сети и её название, решение
+принимаем мы. Уже записанные строки пересчитывает `reclassify_networks`.
+
+Номера собраны из того, что реально встречается у наших пользователей, а не
+из общего списка «всех операторов РФ»: так короче и так проверяемо.
+"""
+
+from nexvpn.models import InboundUsageDay
+
+MOBILE = InboundUsageDay.Network.MOBILE
+FIXED = InboundUsageDay.Network.FIXED
+UNKNOWN = InboundUsageDay.Network.UNKNOWN
+
+# Сети, про которые известно точно.
+KNOWN: dict[int, str] = {
+    # --- мобильные ---
+    15378: MOBILE,   # Tele2 Россия
+    41330: MOBILE,   # Tele2 Новосибирск
+    48190: MOBILE,   # Т2 Мобайл
+    12958: MOBILE,   # T2 Russia Network
+    20632: MOBILE,   # Tele2
+    25159: MOBILE,   # МегаФон (SonicDuo, Москва)
+    31213: MOBILE,   # МегаФон Северо-Запад
+    31133: MOBILE,   # МегаФон
+    8359: MOBILE,    # МТС — основная сеть, мобильного в ней большинство
+    16345: MOBILE,   # Билайн, мобильный сегмент
+    44677: MOBILE,   # Yota
+    43148: MOBILE,   # Yota
+    50928: MOBILE,   # МОТИВ
+
+    # --- домашние ---
+    42116: FIXED,    # ЭР-Телеком / Дом.ру
+    8402: FIXED,     # Корбина — домашний Билайн
+    12389: FIXED,    # Ростелеком
+    25513: FIXED,    # МГТС — домашний МТС
+    34602: FIXED,    # Starlink, московский провайдер (не тот, что у Маска)
+    39927: FIXED,    # ELIGHT
+    42610: FIXED,    # Национальные кабельные сети
+    8752: FIXED,     # АСВТ
+    35807: FIXED,    # SkyNet СПб
+    31370: FIXED,    # Mosline
+    204564: FIXED,   # Мир Митино
+    42668: FIXED,    # Nevalink
+    42065: FIXED,    # E-Telecom
+    41275: FIXED,    # Lealta
+    8580: FIXED,     # Sandy, регион МТС — проводной
+    3216: FIXED,     # Совам / Golden Telecom, магистраль Билайна
+}
+
+# Для незнакомых сетей — по названию. Грубее таблицы, но лучше, чем «неизвестно»:
+# операторы называют свои AS довольно узнаваемо.
+MOBILE_HINTS = ("T2 RUSSIA", "TELE2", "SONICDUO", "MEGAFON", "MF-", "YOTA", "MOTIV", "GSM", "MOBILE")
+FIXED_HINTS = ("TELECOM", "CABLE", "NET", "BROADBAND", "DOM.RU", "ERTH")
+
+
+def classify(asn: int, operator: str = "") -> str:
+    """Тип сети. `UNKNOWN`, если ни таблица, ни название ничего не говорят."""
+    if not asn:
+        return UNKNOWN
+    known = KNOWN.get(asn)
+    if known:
+        return known
+
+    name = (operator or "").upper()
+    if any(hint in name for hint in MOBILE_HINTS):
+        return MOBILE
+    if any(hint in name for hint in FIXED_HINTS):
+        return FIXED
+    return UNKNOWN

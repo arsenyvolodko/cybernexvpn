@@ -539,11 +539,26 @@ class InboundUsageDay(models.Model):
     Без этого признака «🇷🇺 Альтернативный» неотличим от «🛡 Стабильный» —
     инбаунд у них один и тот же, разные только адрес и порт в подписке.
 
-    Счётчик за день **абсолютный**, а не приращение: нода каждый раз
-    пересчитывает сутки по логу целиком и присылает итог. Лог маленький
-    (десятки килобайт в сутки), зато повторная доставка и пропущенный запуск
-    перестают что-либо значить.
+    Счётчик за день **абсолютный**, а не приращение: нода присылает итог с
+    начала суток. Пересчитать его по логу нельзя — лог ротируется каждые
+    несколько часов и суток не хранит, поэтому счёт накапливает сам сборщик в
+    своём состоянии. Зато повторная доставка и пропущенный запуск по-прежнему
+    ничего не портят: пришло то же число — перезаписали тем же.
+
+    `asn` — сеть, из которой человек пришёл, 0 если не определилась. Лежит в
+    ключе вместе с остальным: один и тот же человек за сутки бывает и дома, и
+    на мобильном, и это разные строки. Без этого нельзя ответить на главный
+    вопрос — «каким туннелем не пользуются на Tele2».
+
+    Сырых IP здесь нет намеренно: сборщик разворачивает адрес в сеть прямо на
+    ноде и присылает уже её. Хранить адреса пользователей ради статистики,
+    которая всё равно считается по операторам, незачем.
     """
+
+    class Network(models.TextChoices):
+        MOBILE = "mobile", "Мобильный"
+        FIXED = "fixed", "Домашний"
+        UNKNOWN = "unknown", "Неизвестно"
 
     user = models.ForeignKey(NexUser, on_delete=models.CASCADE, related_name="inbound_usage")
     node_name = models.CharField(max_length=63)
@@ -553,16 +568,26 @@ class InboundUsageDay(models.Model):
     connections = models.PositiveIntegerField(default=0)
     last_seen = models.DateTimeField(null=True, blank=True)
 
+    asn = models.PositiveIntegerField(default=0, help_text="Номер автономной системы, 0 — не определилась")
+    operator = models.CharField(max_length=63, blank=True, default="", help_text="Название сети")
+    network = models.CharField(
+        max_length=15, choices=Network.choices, default=Network.UNKNOWN,
+        help_text="Мобильный или домашний — вывод по оператору, не факт от клиента",
+    )
+
     class Meta:
         verbose_name = "туннель по дням"
         verbose_name_plural = "Использование по туннелям"
         constraints = [
             models.UniqueConstraint(
-                fields=["user", "node_name", "inbound_tag", "via_relay", "date"],
+                fields=["user", "node_name", "inbound_tag", "via_relay", "date", "asn"],
                 name="unique_user_inbound_day",
             )
         ]
-        indexes = [models.Index(fields=["date", "inbound_tag"])]
+        indexes = [
+            models.Index(fields=["date", "inbound_tag"]),
+            models.Index(fields=["date", "asn"]),
+        ]
 
     def __str__(self):
         return f"{self.date} {self.inbound_tag}@{self.node_name}: {self.connections}"

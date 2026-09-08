@@ -231,3 +231,172 @@ def test_scheduled_sync_refuses_to_run_from_a_dev_machine(settings, monkeypatch)
 
     assert tasks.sync_panel() == {"skipped": True}
     assert not called
+
+
+# --- названия профилей ---
+
+
+class FakeHostsPanel:
+    """Панель, отвечающая на три вызова, которые нужны profile_names."""
+
+    def __init__(self, hosts):
+        self.hosts = hosts
+
+    def list_nodes(self):
+        return [{"name": "de1-ovh", "address": "de1.pineferry.com"},
+                {"name": "eu1-ovh", "address": "eu1.pineferry.com"}]
+
+    def list_inbounds(self):
+        return [{"uuid": "aaaa", "tag": "VLESS-REALITY"}, {"uuid": "bbbb", "tag": "VLESS-GRPC"}]
+
+    def list_hosts(self):
+        return self.hosts
+
+
+def test_profile_names_read_the_nested_inbound(settings):
+    """Панель переехала с `inboundUuid` на `inbound.configProfileInboundUuid`.
+
+    Пока код читал плоское поле, сопоставление возвращало пустой словарь — и
+    статистика молча показывала теги вместо названий профилей.
+    """
+    settings.RELAY_NODE_ADDRESS = "ru1.pineferry.com"
+    panel = FakeHostsPanel([
+        {"remark": "🇩🇪 Быстрый — Германия", "address": "de1.pineferry.com",
+         "inbound": {"configProfileInboundUuid": "aaaa"}},
+    ])
+
+    names = telemetry.profile_names(panel)
+
+    assert names[("de1-ovh", "VLESS-REALITY", False)] == "🇩🇪 Быстрый — Германия"
+
+
+def test_profile_names_still_read_the_old_flat_field(settings):
+    """Откат панели не должен снова обнулять названия."""
+    settings.RELAY_NODE_ADDRESS = "ru1.pineferry.com"
+    panel = FakeHostsPanel([
+        {"remark": "Франция 3", "address": "eu1.pineferry.com", "inboundUuid": "bbbb"},
+    ])
+
+    names = telemetry.profile_names(panel)
+
+    assert names[("eu1-ovh", "VLESS-GRPC", False)] == "Франция 3"
+
+
+def test_relay_host_is_attributed_to_the_node_behind_it(settings):
+    """Хост смотрит на релей, а инбаунд лежит на ноде — это профиль «через релей»."""
+    settings.RELAY_NODE_ADDRESS = "ru1.pineferry.com"
+    panel = FakeHostsPanel([
+        {"remark": "🇷🇺 Альтернативный", "address": "ru1.pineferry.com",
+         "inbound": {"configProfileInboundUuid": "bbbb"}},
+    ])
+
+    names = telemetry.profile_names(panel)
+
+    assert names[("eu1-ovh", "VLESS-GRPC", True)] == "🇷🇺 Альтернативный"
+
+
+def test_unmapped_hosts_are_shouted_about(settings, monkeypatch):
+    """Молчаливая пустота — та самая поломка, которую не заметили неделями.
+
+    Перехватываем логгер напрямую, а не через caplog: у логгера `nexvpn` в
+    настройках стоит `propagate: False`, и до корневого обработчика, который
+    слушает caplog, запись не доходит.
+    """
+    settings.RELAY_NODE_ADDRESS = "ru1.pineferry.com"
+    panel = FakeHostsPanel([
+        {"remark": "Непонятный", "address": "de1.pineferry.com", "inbound": {"whatIsThis": "zzz"}},
+    ])
+    shouted: list[str] = []
+    monkeypatch.setattr(telemetry.logger, "error", lambda msg, *a, **kw: shouted.append(str(msg)))
+
+    names = telemetry.profile_names(panel)
+
+    assert names == {}
+    assert any("не сопоставился" in message for message in shouted)
+
+
+# --- статистика по туннелям и сетям ---
+
+
+def make_subscription(panel_user_id: int):
+    return SubscriptionFactory(panel_user_id=panel_user_id, panel_short_uuid=f"s{panel_user_id}")
+
+
+def test_inbound_rows_are_stored_with_the_network():
+    from nexvpn.models import InboundUsageDay
+
+    subscription = make_subscription(413)
+
+    result = telemetry.record_inbound_usage("de1-ovh", [{
+        "panel_user_id": 413, "inbound_tag": "VLESS-REALITY", "via_relay": False,
+        "date": "2026-09-09", "connections": 128, "asn": 41330,
+        "operator": "T2-NOVOSIBIRSK-AS T2 Russia Network",
+    }])
+
+    assert result.stored == 1
+    row = InboundUsageDay.objects.get()
+    assert row.user_id == subscription.user_id
+    assert row.asn == 41330
+    assert row.network == InboundUsageDay.Network.MOBILE, "Tele2 — мобильная сеть"
+
+
+def test_the_same_person_on_two_networks_is_two_rows():
+    """За сутки человек бывает и дома, и на мобильном. Это разные строки —
+    иначе нельзя ответить, каким туннелем не пользуются на Tele2."""
+    from nexvpn.models import InboundUsageDay
+
+    make_subscription(413)
+    base = {"panel_user_id": 413, "inbound_tag": "VLESS-REALITY", "via_relay": False,
+            "date": "2026-09-09"}
+
+    telemetry.record_inbound_usage("de1-ovh", [
+        {**base, "connections": 100, "asn": 41330, "operator": "T2 Russia Network"},
+        {**base, "connections": 20, "asn": 12389, "operator": "ROSTELECOM-AS"},
+    ])
+
+    rows = {row.asn: row for row in InboundUsageDay.objects.all()}
+    assert set(rows) == {41330, 12389}
+    assert rows[41330].network == InboundUsageDay.Network.MOBILE
+    assert rows[12389].network == InboundUsageDay.Network.FIXED
+
+
+def test_repeated_delivery_does_not_double_the_count():
+    """Значения абсолютные: повтор перезаписывает тем же числом."""
+    from nexvpn.models import InboundUsageDay
+
+    make_subscription(413)
+    row = {"panel_user_id": 413, "inbound_tag": "VLESS-REALITY", "via_relay": False,
+           "date": "2026-09-09", "connections": 128, "asn": 41330, "operator": "T2"}
+
+    telemetry.record_inbound_usage("de1-ovh", [row])
+    telemetry.record_inbound_usage("de1-ovh", [row])
+
+    assert InboundUsageDay.objects.count() == 1
+    assert InboundUsageDay.objects.get().connections == 128
+
+
+def test_unknown_network_does_not_break_the_row():
+    from nexvpn.models import InboundUsageDay
+
+    make_subscription(413)
+
+    telemetry.record_inbound_usage("de1-ovh", [{
+        "panel_user_id": 413, "inbound_tag": "Hysteria2-Obfs", "via_relay": True,
+        "date": "2026-09-09", "connections": 5,
+    }])
+
+    row = InboundUsageDay.objects.get()
+    assert row.asn == 0 and row.operator == ""
+    assert row.network == InboundUsageDay.Network.UNKNOWN
+
+
+def test_network_table_beats_the_name_hint():
+    """Корбина — домашний Билайн, хотя в названии оператора мобильных подсказок нет."""
+    from nexvpn import networks
+    from nexvpn.models import InboundUsageDay
+
+    assert networks.classify(8402, "CORBINA-AS OJSC Vimpelcom") == InboundUsageDay.Network.FIXED
+    assert networks.classify(41330, "T2-NOVOSIBIRSK-AS") == InboundUsageDay.Network.MOBILE
+    # Незнакомая сеть — вывод по названию.
+    assert networks.classify(999999, "SOMETHING TELE2 GSM") == InboundUsageDay.Network.MOBILE
+    assert networks.classify(0, "что угодно") == InboundUsageDay.Network.UNKNOWN
