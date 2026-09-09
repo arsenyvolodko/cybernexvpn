@@ -17,11 +17,13 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 
 from django.db.models import Count, F, Q, Sum
 from django.utils import timezone
 
 from nexvpn.enums.subscription_event_reason_enum import SubscriptionEventReasonEnum
+from nexvpn.subscription import panel_sync
 from nexvpn.models import (
     InboundUsageDay,
     RelayNetworkDay,
@@ -34,6 +36,8 @@ from nexvpn.models import (
 )
 
 from .periods import Period
+
+logger = logging.getLogger(__name__)
 
 # Насколько недавно человек должен был выходить в VPN перед окончанием
 # подписки, чтобы считаться ушедшим, а не «давно забросил».
@@ -300,6 +304,9 @@ def _user_row(user: NexUser, spent: int = 0) -> dict:
     presence = getattr(user, "presence", None)
     return {
         "id": user.id,
+        # Вторая дверь к человеку. Ссылки на панель нет и быть не может:
+        # у неё один адрес на все экраны, карточка открывается на фронте.
+        "admin_url": f"/admin/nexvpn/nexuser/{user.id}/change/",
         "name": user.first_name or "",
         "username": user.username or "",
         "telegram_url": f"https://t.me/{user.username}" if user.username else "",
@@ -400,6 +407,8 @@ def user_card(user_id: int) -> dict | None:
         .order_by("-total")[:10]
     ]
 
+    card["devices"] = _devices(getattr(user, "subscription", None))
+
     invitation = UserInvitation.objects.select_related("inviter").filter(invitee=user).first()
     card["invited_by"] = (
         {
@@ -412,6 +421,42 @@ def user_card(user_id: int) -> dict | None:
     )
     card["invited_count"] = UserInvitation.objects.filter(inviter=user).count()
     return card
+
+
+def _devices(subscription) -> dict:
+    """Устройства человека — прямо из панели, у нас их нет.
+
+    Мы храним только счётчик первого подключения; какие именно устройства и
+    когда были активны, знает панель. Поэтому запрос идёт туда, и только при
+    открытии карточки, а не на каждую перерисовку таблицы.
+
+    Панель молчит — говорим об этом прямо. Пустой список и «не смогли
+    спросить» это разные вещи: первое значит «устройств нет».
+    """
+    if subscription is None or not subscription.panel_user_id:
+        return {"ok": True, "items": []}
+    try:
+        raw = panel_sync.list_devices(subscription)
+    except Exception as error:
+        logger.warning("Панель не отдала устройства для %s: %s", subscription.user_id, error)
+        return {"ok": False, "items": []}
+
+    items = [
+        {
+            "title": device.get("deviceModel") or device.get("platform") or "Без названия",
+            "platform": device.get("platform") or "",
+            "os": device.get("osVersion") or "",
+            "app": (device.get("userAgent") or "").split("/")[0],
+            "hwid": (device.get("hwid") or "")[:8],
+            # updatedAt — последняя активность, createdAt — когда устройство
+            # впервые появилось. Панель отдаёт время в UTC со сдвигом Z.
+            "last_seen": device.get("updatedAt"),
+            "first_seen": device.get("createdAt"),
+        }
+        for device in raw
+    ]
+    items.sort(key=lambda item: item["last_seen"] or "", reverse=True)
+    return {"ok": True, "items": items}
 
 
 def _iso(value) -> str | None:

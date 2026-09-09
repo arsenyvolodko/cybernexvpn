@@ -183,3 +183,68 @@ def test_purchase_after_trial_lifts_the_cap(plan):
     due = due_reminders()
 
     assert len(due) == 1 and due[0][1] == 168
+
+
+# --- сколько осталось: текст напоминания ---
+
+
+def at(hours: float, plan):
+    """Подписка, до конца которой ровно столько часов."""
+    return SubscriptionFactory(plan=plan, expires_at=now() + timedelta(hours=hours))
+
+
+@pytest.mark.parametrize(
+    "hours, expected",
+    [
+        # Напоминание за N часов уходит, когда осталось чуть меньше N.
+        # Текст обязан называть то самое N, а не N-1.
+        (1.97, "2 часа"),
+        (0.97, "1 час"),
+        (5.95, "6 часов"),
+        (11.9, "12 часов"),
+        # Почти сутки — честнее «1 день», чем «24 часа».
+        (23.9, "1 день"),
+        (47.9, "2 дня"),
+        (167.5, "7 дней"),
+        # Пробный: трое суток плюс округление до 20:00 — это всё ещё три дня,
+        # а не четыре.
+        (78, "3 дня"),
+        (0.2, "1 час"),
+    ],
+)
+def test_remaining_names_the_right_amount(hours, expected, plan):
+    from bot.notifications import remaining
+
+    assert remaining(at(hours, plan)) == expected
+
+
+def test_two_reminders_in_a_row_do_not_say_the_same(plan):
+    """Раньше и «за 2 часа», и «за 1 час» говорили «1 час».
+
+    Обрезание вниз делало соседние напоминания неразличимыми, и человек дважды
+    подряд читал одно и то же.
+    """
+    from bot.notifications import remaining
+
+    assert remaining(at(1.97, plan)) != remaining(at(0.97, plan))
+
+
+def test_text_has_no_absolute_time(plan):
+    """Окончание округляется к 20:00 МСК, а часового пояса человека мы не знаем."""
+    from bot.notifications import build_text
+
+    text = build_text(at(26, plan))
+
+    assert ":" not in text.split("Тариф")[0] or "20:00" not in text
+    assert "20:00" not in text
+    assert "До окончания: 1 день" in text
+
+
+def test_one_hour_reads_correctly(plan):
+    """«Осталось 1 час» — рассогласование, из-за него формулировку и меняли."""
+    from bot.notifications import build_text
+
+    text = build_text(at(0.97, plan))
+
+    assert "До окончания: 1 час" in text
+    assert "Осталось 1 час" not in text

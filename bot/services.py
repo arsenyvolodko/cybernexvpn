@@ -42,6 +42,10 @@ class SubscriptionView:
     devices_used: int | None  # None — панель не ответила
     device_limit: int
     web_url: str | None
+    # Подписки нет, но человеку положен пробный и он его ещё не начинал.
+    # Отличает новичка, который просто не жал «Подключиться», от того, у кого
+    # подписки нет по-настоящему.
+    trial_available: bool = False
 
     @property
     def exists(self) -> bool:
@@ -62,10 +66,11 @@ class SubscriptionView:
 
 @sync_to_async
 def get_or_create_user(telegram_id: int, username: str | None, first_name: str | None) -> tuple[NexUser, bool]:
-    """Пользователь бота. Новому сразу выдаётся пробный период.
+    """Пользователь бота.
 
-    Легаси-пользователю пробный не полагается — это решает `grant_trial`,
-    здесь только отмечаем факт первого захода в новую версию.
+    Пробный период здесь **не выдаётся**: он начинается по «Подключиться»,
+    см. `ensure_trial`. Иначе отсчёт стартовал бы до того, как человек прошёл
+    экран подписки на канал, и сгорал у тех, кто так и не подключился.
     """
     user, created = NexUser.objects.get_or_create(
         pk=telegram_id,
@@ -85,12 +90,24 @@ def get_or_create_user(telegram_id: int, username: str | None, first_name: str |
     if fields_to_update:
         user.save(update_fields=fields_to_update)
 
-    if created:
-        subscription = service.grant_trial(user)
-        if subscription is not None:
-            _sync_quietly(subscription)
-
     return user, created
+
+
+@sync_to_async
+def ensure_trial(user: NexUser) -> Subscription | None:
+    """Начать пробный период, если он ещё не начат.
+
+    Зовётся с экрана «Подключиться», а не при создании пользователя: отсчёт
+    должен идти с момента, когда человек берёт ссылку, а не с момента, когда
+    он впервые открыл бота. Повторные нажатия безопасны — `grant_trial`
+    сам откажет, если подписка уже есть.
+    """
+    subscription = service.grant_trial(user)
+    if subscription is not None:
+        # Синхронно: ссылка на подписку нужна прямо сейчас, на следующем шаге.
+        # Не доехало — экран честно скажет «ещё не готово», добьёт celery.
+        _sync_quietly(subscription)
+    return subscription
 
 
 @sync_to_async
@@ -141,7 +158,10 @@ def get_subscription_view(user: NexUser) -> SubscriptionView:
         .first()
     )
     if subscription is None:
-        return SubscriptionView(subscription=None, devices_used=None, device_limit=0, web_url=None)
+        return SubscriptionView(
+            subscription=None, devices_used=None, device_limit=0, web_url=None,
+            trial_available=service.trial_available(user),
+        )
 
     subscription = service.ensure_current_plan(subscription)
 

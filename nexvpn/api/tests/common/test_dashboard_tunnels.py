@@ -264,3 +264,59 @@ def test_relay_tunnels_stay_out_of_the_matrix(plan):
 
     assert all("Франция" not in tunnel["title"] for tunnel in matrix["tunnels"])
     assert len(matrix["tunnels"]) == 1
+
+
+# --- ссылки на человека из дашборда ---
+
+
+def test_user_row_links_to_the_admin(plan):
+    subscription = SubscriptionFactory(plan=plan, panel_user_id=668, panel_short_uuid="CmkBrZMf")
+
+    row = queries._user_row(subscription.user)
+
+    assert row["admin_url"] == f"/admin/nexvpn/nexuser/{subscription.user_id}/change/"
+
+
+# --- устройства в карточке ---
+
+
+def test_card_shows_devices_from_the_panel(plan, monkeypatch):
+    subscription = SubscriptionFactory(plan=plan, panel_user_id=450)
+    monkeypatch.setattr(queries.panel_sync, "list_devices", lambda s: [
+        {"hwid": "7102b1a5-ff0a-471d", "platform": "Windows", "osVersion": "10_10.0.19045",
+         "deviceModel": "DESKTOP-675SBH8", "userAgent": "Happ/3.3.6/Windows/26",
+         "createdAt": "2026-08-12T16:25:09.428Z", "updatedAt": "2026-09-09T14:35:38.646Z"},
+        {"hwid": "aaaa", "platform": "iOS", "deviceModel": "iPhone 15",
+         "createdAt": "2026-09-01T10:00:00.000Z", "updatedAt": "2026-09-09T20:00:00.000Z"},
+    ])
+
+    card = queries.user_card(subscription.user_id)
+
+    assert card["devices"]["ok"] is True
+    titles = [d["title"] for d in card["devices"]["items"]]
+    assert titles == ["iPhone 15", "DESKTOP-675SBH8"], "свежие сверху"
+    first = card["devices"]["items"][1]
+    assert first["app"] == "Happ" and first["platform"] == "Windows"
+    assert first["last_seen"] == "2026-09-09T14:35:38.646Z"
+
+
+def test_panel_silence_is_not_the_same_as_no_devices(plan, monkeypatch):
+    """«Устройств нет» и «не смогли спросить» — разные вещи, и путать их нельзя."""
+    subscription = SubscriptionFactory(plan=plan, panel_user_id=450)
+
+    def boom(s):
+        raise RuntimeError("панель недоступна")
+
+    monkeypatch.setattr(queries.panel_sync, "list_devices", boom)
+
+    card = queries.user_card(subscription.user_id)
+
+    assert card["devices"] == {"ok": False, "items": []}
+
+
+def test_no_panel_user_means_no_devices(plan, monkeypatch):
+    subscription = SubscriptionFactory(plan=plan, panel_user_id=None)
+    monkeypatch.setattr(queries.panel_sync, "list_devices",
+                        lambda s: pytest.fail("в панель ходить незачем"))
+
+    assert queries.user_card(subscription.user_id)["devices"] == {"ok": True, "items": []}

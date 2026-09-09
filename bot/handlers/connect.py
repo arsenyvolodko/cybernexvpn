@@ -17,7 +17,12 @@ from bot.handlers.common import render
 from bot.keyboards import ButtonsStorage, keyboards
 from bot.keyboards.factories import ConnectCallback
 from bot.device_watch import start_watching
-from bot.services import create_connection_watch, get_subscription_view, list_devices
+from bot.services import (
+    create_connection_watch,
+    ensure_trial,
+    get_subscription_view,
+    list_devices,
+)
 from nexvpn.models import NexUser
 
 logger = logging.getLogger(__name__)
@@ -52,6 +57,13 @@ async def connect_screen(user: NexUser):
     Разъехаться этим двум путям нельзя: человек должен видеть одно и то же.
     """
     view = await get_subscription_view(user)
+
+    # Момент истины: человек взялся подключаться — вот теперь и начинаем
+    # пробный период. До этого шага он не тратится: раньше отсчёт стартовал с
+    # первого /start, и у трети новичков дни сгорали, так и не пригодившись.
+    if not view.exists and view.trial_available:
+        if await ensure_trial(user) is not None:
+            view = await get_subscription_view(user)
 
     if not view.exists:
         return texts.SUBSCRIPTION_NONE, keyboards.only_back()

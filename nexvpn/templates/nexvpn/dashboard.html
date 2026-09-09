@@ -68,6 +68,15 @@
   table { width: 100%; border-collapse: collapse; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
   th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+  th.sortable:hover { color: var(--ink); }
+  th .arrow { opacity: .35; margin-left: 3px; }
+  th.on { color: var(--ink); }
+  th.on .arrow { opacity: 1; color: var(--accent); }
+  .more { padding: 12px 10px 2px; }
+  .more button { font: inherit; color: var(--link); background: none; border: none;
+                 cursor: pointer; padding: 4px 0; }
+  .more button:hover { text-decoration: underline; }
   tbody tr { cursor: pointer; }
   tbody tr:hover { background: #f8fafc; }
   td.num, th.num { text-align: right; }
@@ -86,6 +95,10 @@
   .bar-cell .track { flex: 1; height: 6px; background: #eef1f6; border-radius: 3px; overflow: hidden; min-width: 60px; }
   .bar-cell .fill { height: 100%; background: var(--accent); }
   .muted { color: var(--muted); }
+  .doors { display: inline-flex; gap: 6px; margin-left: 6px; }
+  .doors a { font-size: 11px; border: 1px solid var(--line); border-radius: 5px;
+             padding: 1px 5px; color: var(--muted); text-decoration: none; }
+  .doors a:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
 
   table.matrix th, table.matrix td { padding: 6px 8px; }
   table.matrix th.rot { font-size: 11.5px; line-height: 1.2; white-space: normal;
@@ -250,6 +263,15 @@ function tgLink(row) {
   return '<a href="https://t.me/' + row.username + '" target="_blank" rel="noopener">@' + row.username + "</a>";
 }
 
+// Вторая дверь к человеку — админка. Ссылки на панель нет намеренно: у неё
+// один адрес на все экраны, карточка открывается на фронте, и вести туда
+// значит вести просто «в панель», а не к этому человеку.
+function doors(row) {
+  if (!row.admin_url) return "";
+  return '<span class="doors"><a href="' + row.admin_url +
+         '" target="_blank" rel="noopener" title="Открыть в админке">админка</a></span>';
+}
+
 function query(extra) {
   const p = new URLSearchParams();
   if (state.from && state.to) { p.set("from", state.from); p.set("to", state.to); }
@@ -391,16 +413,85 @@ window.addEventListener("resize", () => {
 let tunnelData = null;
 
 // ─── таблицы ───
-function drawTable(el, columns, rows, onRow) {
-  if (!rows.length) { el.innerHTML = '<tbody><tr><td class="empty">Ничего нет</td></tr></tbody>'; return; }
-  const head = "<thead><tr>" + columns.map((c) =>
-    '<th class="' + (c.num ? "num" : "") + '">' + c.title + "</th>").join("") + "</tr></thead>";
-  const body = "<tbody>" + rows.map((row, i) => "<tr data-i=" + i + ">" + columns.map((c) =>
-    '<td class="' + (c.num ? "num" : "") + '">' + c.cell(row) + "</td>").join("") + "</tr>").join("") + "</tbody>";
-  el.innerHTML = head + body;
-  if (onRow) el.querySelectorAll("tbody tr").forEach((tr) => {
-    tr.onclick = (e) => { if (e.target.tagName !== "A") onRow(rows[+tr.dataset.i]); };
-  });
+// Состояние таблиц живёт снаружи: сортировка и «показать всех» должны
+// переживать перерисовку, иначе после клика по заголовку таблица схлопывалась
+// бы обратно к первым двадцати строкам.
+const tableState = {};
+
+function drawTable(el, columns, rows, onRow, options) {
+  const settings = options || {};
+  const state = tableState[el.id] || (tableState[el.id] = { sort: null, dir: -1, expanded: false });
+
+  function sorted() {
+    if (state.sort === null || !columns[state.sort] || !columns[state.sort].sort) return rows;
+    const key = columns[state.sort].sort;
+    // Копия, а не сортировка на месте: исходный порядок с сервера может
+    // понадобиться, когда сортировку сбросят.
+    return rows.slice().sort((a, b) => {
+      const left = key(a), right = key(b);
+      // Пустые значения всегда внизу, в обе стороны: «нет данных» — это не
+      // «меньше всех», и прыгать наверх при обратной сортировке оно не должно.
+      const leftEmpty = left === null || left === undefined || left === "";
+      const rightEmpty = right === null || right === undefined || right === "";
+      if (leftEmpty || rightEmpty) return leftEmpty - rightEmpty;
+      if (typeof left === "string" || typeof right === "string") {
+        return String(left).localeCompare(String(right), "ru") * state.dir;
+      }
+      return (left - right) * state.dir;
+    });
+  }
+
+  function render() {
+    if (!rows.length) {
+      el.innerHTML = '<tbody><tr><td class="empty">Ничего нет</td></tr></tbody>';
+      return;
+    }
+    const all = sorted();
+    const limit = settings.limit && !state.expanded ? settings.limit : all.length;
+    const shown = all.slice(0, limit);
+
+    const head = "<thead><tr>" + columns.map((c, i) => {
+      const classes = [c.num ? "num" : "", c.sort ? "sortable" : "", state.sort === i ? "on" : ""];
+      const arrow = c.sort
+        ? '<span class="arrow">' + (state.sort === i ? (state.dir === 1 ? "▲" : "▼") : "↕") + "</span>"
+        : "";
+      return '<th class="' + classes.join(" ").trim() + '" data-col=' + i + ">" + c.title + arrow + "</th>";
+    }).join("") + "</tr></thead>";
+
+    const body = "<tbody>" + shown.map((row, i) => "<tr data-i=" + i + ">" + columns.map((c) =>
+      '<td class="' + (c.num ? "num" : "") + '">' + c.cell(row) + "</td>").join("") + "</tr>").join("") + "</tbody>";
+
+    let footer = "";
+    if (all.length > limit) {
+      footer = '<tfoot><tr><td class="more" colspan=' + columns.length +
+        '><button data-more="1">Показать все ' + fmtInt(all.length) + " — сейчас видно " +
+        fmtInt(limit) + "</button></td></tr></tfoot>";
+    } else if (settings.limit && state.expanded && all.length > settings.limit) {
+      footer = '<tfoot><tr><td class="more" colspan=' + columns.length +
+        '><button data-more="0">Свернуть до ' + fmtInt(settings.limit) + "</button></td></tr></tfoot>";
+    }
+
+    el.innerHTML = head + body + footer;
+
+    el.querySelectorAll("th.sortable").forEach((th) => {
+      th.onclick = () => {
+        const column = +th.dataset.col;
+        // Первый клик по новому столбцу — по убыванию: интересное обычно
+        // сверху, а не в хвосте.
+        if (state.sort === column) state.dir = -state.dir;
+        else { state.sort = column; state.dir = -1; }
+        render();
+      };
+    });
+    const more = el.querySelector("button[data-more]");
+    if (more) more.onclick = () => { state.expanded = more.dataset.more === "1"; render(); };
+
+    if (onRow) el.querySelectorAll("tbody tr").forEach((tr) => {
+      tr.onclick = (e) => { if (e.target.tagName !== "A") onRow(shown[+tr.dataset.i]); };
+    });
+  }
+
+  render();
 }
 
 async function loadPayments() {
@@ -414,7 +505,11 @@ async function loadPayments() {
   if (state.day) $("allDays").onclick = (e) => { e.preventDefault(); state.day = ""; loadPayments(); };
   drawTable($("payTable"), [
     { title: "Когда", cell: (r) => fmtDate(r.processed_at || r.created_at, true) },
-    { title: "Кто", cell: (r) => tgLink({ id: r.user_id, name: r.user_name, username: r.username }) },
+    { title: "Кто", cell: (r) => {
+        const person = { id: r.user_id, name: r.user_name, username: r.username,
+                         admin_url: r.user_id ? "/admin/nexvpn/nexuser/" + r.user_id + "/change/" : "" };
+        return tgLink(person) + doors(person);
+      } },
     { title: "Имя", cell: (r) => r.user_name || "—" },
     { title: "Тариф", cell: (r) => r.plan || "—" },
     { title: "Мес.", num: true, cell: (r) => r.months },
@@ -438,19 +533,27 @@ async function loadUsers() {
   const data = await api("/dash/api/users/", { segment: state.segment, q: state.q });
   if (!data) return;
   $("userHint").textContent = data.title + " — " + data.rows.length +
-    (data.rows.length >= 200 ? " (показаны первые 200)" : "");
+    // 200 — потолок выборки на сервере. «Показать всех» раскроет то, что
+    // доехало, но за этим потолком остаётся ещё хвост, и молчать про него нельзя.
+    (data.rows.length >= 200 ? ", это первые 200 из выборки" : "");
+  // Сортировка идёт по значению, а не по тому, что нарисовано в ячейке:
+  // «12.09.2026» и «не подключался» сравнивать как строки бессмысленно.
+  const stamp = (value) => value ? Date.parse(value) : null;
   drawTable($("userTable"), [
-    { title: "Кто", cell: (r) => tgLink(r) },
-    { title: "Имя", cell: (r) => r.name || "—" },
-    { title: "Тариф", cell: (r) => r.plan || "—" },
-    { title: "Подписка до", cell: (r) => fmtDate(r.expires_at) +
+    { title: "Кто", cell: (r) => tgLink(r) + doors(r), sort: (r) => r.username || r.name || "" },
+    { title: "Имя", cell: (r) => r.name || "—", sort: (r) => r.name || "" },
+    { title: "Тариф", cell: (r) => r.plan || "—", sort: (r) => r.plan || "" },
+    { title: "Подписка до", sort: (r) => stamp(r.expires_at),
+      cell: (r) => fmtDate(r.expires_at) +
         (r.is_active ? "" : ' <span class="tag no">истекла</span>') },
-    { title: "Последний онлайн", cell: (r) => r.first_connected_at
+    { title: "Последний онлайн", sort: (r) => r.first_connected_at ? stamp(r.online_at) : null,
+      cell: (r) => r.first_connected_at
         ? fmtDate(r.online_at, true) : '<span class="tag no">не подключался</span>' },
-    { title: "Трафик", num: true, cell: (r) => fmtBytes(r.traffic) },
-    { title: "Заплатил", num: true, cell: (r) => r.spent ? fmtMoney(r.spent) : "—" },
-    { title: "Пришёл", cell: (r) => fmtDate(r.created_at) },
-  ], data.rows, (row) => openUser(row.id));
+    { title: "Трафик", num: true, cell: (r) => fmtBytes(r.traffic), sort: (r) => r.traffic || 0 },
+    { title: "Заплатил", num: true, cell: (r) => r.spent ? fmtMoney(r.spent) : "—",
+      sort: (r) => r.spent || 0 },
+    { title: "Пришёл", cell: (r) => fmtDate(r.created_at), sort: (r) => stamp(r.created_at) },
+  ], data.rows, (row) => openUser(row.id), { limit: 20 });
 }
 
 // ─── туннели ───
@@ -585,7 +688,7 @@ async function openUser(id) {
   if (!res.ok) return;
   const u = await res.json();
   const kv = (t, v) => '<div><div class="t">' + t + '</div><div class="v">' + v + "</div></div>";
-  let html = "<h3>" + (u.name || "Без имени") + " " + tgLink(u) + "</h3>" +
+  let html = "<h3>" + (u.name || "Без имени") + " " + tgLink(u) + doors(u) + "</h3>" +
     '<div class="sub">id ' + u.id + " · в базе с " + fmtDate(u.created_at) +
     (u.is_legacy ? " · перенесён из старой версии" : "") + "</div>";
   html += '<div class="kv">' +
@@ -598,6 +701,27 @@ async function openUser(id) {
     kv("Пригласил", u.invited_count + " чел.") +
     kv("Пришёл по ссылке", u.invited_by ? (u.invited_by.username ? "@" + u.invited_by.username : "id " + u.invited_by.id) : "—") +
     "</div>";
+
+  if (u.devices) {
+    if (!u.devices.ok) {
+      html += '<h4>Устройства</h4><div class="muted">Панель не ответила — список не показать</div>';
+    } else if (!u.devices.items.length) {
+      html += '<h4>Устройства</h4><div class="muted">Ни одного подключённого</div>';
+    } else {
+      html += "<h4>Устройства (" + u.devices.items.length + ")</h4><div class='scroll'><table><tbody>" +
+        u.devices.items.map((d) => {
+          const gap = d.last_seen ? Date.now() - Date.parse(d.last_seen) : null;
+          // Неделя без активности — устройство скорее заброшено, чем живо.
+          const stale = gap !== null && gap > 7 * 24 * 3600 * 1000;
+          return "<tr><td>" + d.title + "</td><td>" +
+            [d.platform, d.os].filter(Boolean).join(" ") + "</td><td>" +
+            (d.app || "—") + "</td><td>" + fmtDate(d.first_seen) + "</td><td" +
+            (stale ? ' class="muted"' : "") + ">" + fmtDate(d.last_seen, true) + "</td></tr>";
+        }).join("") + "</tbody></table></div>" +
+        '<div class="muted" style="font-size:11.5px;margin-top:4px">' +
+        "название · система · приложение · появилось · последняя активность</div>";
+    }
+  }
 
   if (u.payments.length) {
     html += "<h4>Платежи</h4><div class='scroll'><table><tbody>" + u.payments.map((p) =>

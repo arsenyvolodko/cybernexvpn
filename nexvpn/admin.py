@@ -1,7 +1,10 @@
+import logging
+
 from django.contrib import admin, messages
 from django.shortcuts import render
 
-from nexvpn.enums import BroadcastStatusEnum
+from nexvpn.enums import BroadcastStatusEnum, PanelSyncStatusEnum
+from nexvpn.subscription import panel_sync
 from nexvpn.models import (
     AllowedUserPromoCode,
     BillingPeriod,
@@ -23,6 +26,8 @@ from nexvpn.models import (
     UsedPromoCode,
     UserInvitation,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @admin.register(Plan)
@@ -100,8 +105,115 @@ class GlobalSettingsAdmin(admin.ModelAdmin):
         return redirect(reverse("admin:nexvpn_globalsettings_change", args=[obj.pk]))
 
 
+def push_to_panel(request, subscription, notify) -> None:
+    """Дотолкать подписку в панель и сказать человеку, что вышло.
+
+    Общая для отдельной страницы подписки и для inline внутри пользователя:
+    правка через inline идёт мимо `save_model`, и без этого дата менялась бы
+    у нас, а панель продолжала пускать по старой.
+    """
+    try:
+        synced = panel_sync.sync_subscription(subscription)
+    except Exception as error:
+        logger.exception("Не удалось синхронизировать подписку %s", subscription.pk)
+        notify(
+            request,
+            f"В базе сохранено, но в панель не доехало: {error}. "
+            f"Повторит фоновая задача в течение пяти минут.",
+            messages.WARNING,
+        )
+        return
+
+    if synced:
+        notify(request, "Изменения применены и в панели.", messages.SUCCESS)
+    else:
+        notify(
+            request,
+            "В базе сохранено, панель отказала — подробности в поле «panel_error». "
+            "Повторит фоновая задача.",
+            messages.WARNING,
+        )
+
+
+class ReadOnlyInline(admin.TabularInline):
+    """Инлайн «просто посмотреть»: ничего не добавить, не поправить, не удалить.
+
+    История и платежи правятся не руками, а тем кодом, который их создаёт.
+    Дать их редактировать здесь — значит однажды получить срок, не сходящийся
+    ни с одним событием.
+    """
+
+    extra = 0
+    can_delete = False
+    show_change_link = True
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def get_readonly_fields(self, request, obj=None):
+        return [field.name for field in self.model._meta.fields]
+
+
+class SubscriptionInline(admin.StackedInline):
+    """Единственный инлайн, который можно править: срок и тариф.
+
+    Ради него всё и затевалось — менять дату окончания, не уходя со страницы
+    человека. Изменения уезжают в панель, см. `save_formset` ниже.
+    """
+
+    model = Subscription
+    can_delete = False
+    max_num = 1
+    extra = 0
+    fields = ("plan", "next_plan", "expires_at", "auto_renew_agreed", "panel_status",
+              "panel_user_id", "subscription_url", "panel_synced_at", "panel_error")
+    readonly_fields = ("panel_status", "panel_user_id", "subscription_url",
+                       "panel_synced_at", "panel_error")
+
+
+class SubscriptionEventInline(ReadOnlyInline):
+    model = SubscriptionEvent
+    fk_name = "user"
+    verbose_name_plural = "История подписки"
+    ordering = ("-created_at",)
+
+
+class PaymentInline(ReadOnlyInline):
+    model = Payment
+    verbose_name_plural = "Платежи"
+    ordering = ("-created_at",)
+
+
+class TransactionInline(ReadOnlyInline):
+    model = Transaction
+    verbose_name_plural = "Транзакции"
+    ordering = ("-created_at",)
+
+
+class PanelPresenceInline(ReadOnlyInline):
+    model = PanelPresence
+    verbose_name_plural = "Присутствие в панели"
+
+
+class InvitationInline(ReadOnlyInline):
+    model = UserInvitation
+    fk_name = "inviter"
+    verbose_name_plural = "Кого пригласил"
+    ordering = ("-created_at",)
+
+
 @admin.register(Subscription)
 class SubscriptionAdmin(admin.ModelAdmin):
+    """Правка подписки руками. Изменения уезжают в панель сразу же.
+
+    Без этого правка срока здесь ничего не значила: в нашей базе дата менялась,
+    а панель продолжала пускать или не пускать человека по старой — то есть
+    админка показывала одно, а сервис вёл себя иначе.
+    """
+
     list_display = ("user", "plan", "next_plan", "expires_at", "days_left", "panel_status")
     list_filter = ("plan", "panel_status")
     search_fields = ("user__username", "user__id")
@@ -111,6 +223,17 @@ class SubscriptionAdmin(admin.ModelAdmin):
     @admin.display(description="Осталось дней")
     def days_left(self, obj):
         return obj.days_left
+
+    def save_model(self, request, obj, form, change):
+        """Сохранить и тут же дотолкать в панель.
+
+        Отметка PENDING ставится до попытки: если панель не ответит, подписку
+        подберёт celery через пять минут. Ошибку показываем прямо в админке —
+        молча оставлять расхождение нельзя, оно проявится отказом в доступе.
+        """
+        obj.panel_status = PanelSyncStatusEnum.PENDING
+        super().save_model(request, obj, form, change)
+        push_to_panel(request, obj, lambda req, text, level: self.message_user(req, text, level=level))
 
 
 @admin.register(SubscriptionEvent)
@@ -122,9 +245,43 @@ class SubscriptionEventAdmin(admin.ModelAdmin):
 
 @admin.register(NexUser)
 class NexUserAdmin(admin.ModelAdmin):
+    """Страница человека: подписка правится здесь же, остальное — на просмотр."""
+
     list_display = ("id", "username", "first_name", "email", "is_legacy", "activated_at")
     list_filter = ("is_legacy",)
     search_fields = ("username", "id", "email")
+    inlines = (
+        SubscriptionInline,
+        PanelPresenceInline,
+        SubscriptionEventInline,
+        PaymentInline,
+        TransactionInline,
+        InvitationInline,
+    )
+
+    def save_formset(self, request, form, formset, change):
+        """Правка подписки из inline тоже обязана доехать до панели.
+
+        Inline сохраняется мимо `save_model`, поэтому без этого дата менялась
+        бы только у нас: админка показывала бы один срок, а панель пускала бы
+        человека по другому. Расхождение молчаливое и всплывает отказом
+        в доступе, а не ошибкой.
+        """
+        if formset.model is not Subscription:
+            return super().save_formset(request, form, formset, change)
+
+        instances = formset.save(commit=False)
+        for instance in instances:
+            # Отметка до попытки: не доедет сейчас — подберёт celery.
+            instance.panel_status = PanelSyncStatusEnum.PENDING
+            instance.save()
+        for obj in formset.deleted_objects:
+            obj.delete()
+        formset.save_m2m()
+
+        for instance in instances:
+            push_to_panel(request, instance,
+                          lambda req, text, level: self.message_user(req, text, level=level))
 
 
 @admin.register(LegacyMigrationRecord)

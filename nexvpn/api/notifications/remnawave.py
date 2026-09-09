@@ -26,7 +26,8 @@ from rest_framework.decorators import api_view
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from nexvpn.models import DeviceConnectionWatch
+from nexvpn.enums import PanelSyncStatusEnum, SubscriptionEventReasonEnum
+from nexvpn.models import DeviceConnectionWatch, SentReminder, Subscription, SubscriptionEvent
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,12 @@ SIGNATURE_HEADER = "HTTP_X_REMNAWAVE_SIGNATURE"
 MAX_AGE = timedelta(minutes=5)
 
 EVENT_HWID_ADDED = "user_hwid_devices.added"
+EVENT_USER_MODIFIED = "user.modified"
+
+# Меньше минуты разницы — это наше же изменение, вернувшееся эхом, или
+# округление при передаче. Реагировать на такое нельзя: мы пишем в панель,
+# панель шлёт нам событие, мы пишем себе — и так по кругу.
+ECHO_TOLERANCE = timedelta(minutes=1)
 
 
 def _signature_matches(raw_body: bytes, provided: str) -> bool:
@@ -77,6 +84,8 @@ def handle_webhook(request: Request) -> Response:
 
     if event == EVENT_HWID_ADDED:
         _handle_device_added(data)
+    elif event == EVENT_USER_MODIFIED:
+        _handle_user_modified(data)
     else:
         logger.info("Вебхук Remnawave: %s", event)
 
@@ -110,4 +119,86 @@ def _handle_device_added(data: dict) -> None:
         chat_id=watch.chat_id,
         message_id=watch.message_id,
         device_title=data.get("deviceModel") or data.get("platform") or "Устройство",
+    )
+
+
+def _parse_expire(raw) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        logger.warning("Не разобрал expireAt из вебхука: %r", raw)
+        return None
+
+
+def _handle_user_modified(data: dict) -> None:
+    """Срок правили прямо в панели — принять это у себя.
+
+    Источник правды всё же наш: в `SubscriptionEvent` лежит, **почему** у
+    человека такой срок, и панель этой истории не знает. Поэтому изменение не
+    просто записывается в поле, а фиксируется событием — иначе через полгода
+    дата окажется необъяснимой, и никто не поймёт, откуда она взялась.
+
+    Принимаем только у подписок в состоянии `synced`. `pending` означает, что
+    мы сами сейчас что-то меняем и наша правка всё равно перезапишет панель;
+    подхватить в этот момент её значение — значит потерять своё.
+    """
+    panel_user_id = data.get("id") or data.get("userId")
+    expires_at = _parse_expire(data.get("expireAt"))
+    if panel_user_id is None or expires_at is None:
+        return
+
+    subscription = (
+        Subscription.objects.select_related("user", "plan")
+        .filter(panel_user_id=panel_user_id)
+        .first()
+    )
+    if subscription is None:
+        telegram_id = data.get("telegramId")
+        if telegram_id:
+            subscription = (
+                Subscription.objects.select_related("user", "plan")
+                .filter(user_id=telegram_id)
+                .first()
+            )
+    if subscription is None:
+        logger.info("Панель изменила пользователя %s, которого у нас нет", panel_user_id)
+        return
+
+    before = subscription.expires_at
+    if abs(expires_at - before) < ECHO_TOLERANCE:
+        # Наше же изменение вернулось эхом — панель шлёт событие и на свои
+        # правки, и на наши.
+        return
+
+    if subscription.panel_status != PanelSyncStatusEnum.SYNCED:
+        logger.info(
+            "Панель изменила срок у %s, но у нас правка в очереди (%s) — оставляем своё",
+            subscription.user_id, subscription.panel_status,
+        )
+        return
+
+    subscription.expires_at = expires_at
+    subscription.save(update_fields=["expires_at", "updated_at"])
+
+    # Период сдвинулся — напоминания по нему шлём заново, ровно как при
+    # начислении дней. Иначе человек с продлённой в панели подпиской не
+    # получит ни одного предупреждения о новом окончании.
+    SentReminder.objects.filter(subscription=subscription).delete()
+
+    SubscriptionEvent.objects.create(
+        user=subscription.user,
+        subscription=subscription,
+        reason=SubscriptionEventReasonEnum.ADMIN_ADJUSTMENT,
+        delta_days=round((expires_at - before).total_seconds() / 86400),
+        plan=subscription.plan,
+        price_month=subscription.plan.price_month,
+        expires_at_before=before,
+        expires_at_after=expires_at,
+        comment="Изменено в панели",
+    )
+    logger.info(
+        "Приняли из панели новый срок для %s: %s -> %s",
+        subscription.user_id, before, expires_at,
     )

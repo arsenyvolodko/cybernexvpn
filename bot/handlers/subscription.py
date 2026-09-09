@@ -3,6 +3,8 @@ import logging
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
 
+from django.conf import settings
+
 from bot import texts
 from bot.handlers.common import render
 from bot.keyboards import ButtonsStorage, keyboards
@@ -16,6 +18,13 @@ router = Router(name="subscription")
 
 def build_text(view: SubscriptionView) -> str:
     if not view.exists:
+        if view.trial_available:
+            # Пробный не начат: отсчёт стартует по «Подключиться». Сказать
+            # такому человеку «подписки нет» — значит противоречить
+            # приветствию, которое обещало ему дни минуту назад.
+            return texts.SUBSCRIPTION_TRIAL_WAITING.format(
+                trial=texts.plural_days(settings.TRIAL_DAYS)
+            )
         return texts.SUBSCRIPTION_NONE
 
     subscription = view.subscription

@@ -14,7 +14,7 @@ import logging
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from django.conf import settings
 from django.db import IntegrityError
-from django.utils.timezone import localtime, now
+from django.utils.timezone import now
 
 from bot import texts
 from bot.keyboards import keyboards
@@ -113,29 +113,47 @@ def _timedelta_hours(hours: int):
     return timedelta(hours=hours)
 
 
+# Ниже этого порога говорим в часах, выше — в днях. Порог не ровно сутки:
+# при 23 ч 59 мин честнее сказать «1 день», чем «24 часа».
+DAYS_THRESHOLD_MINUTES = 23.5 * 60
+
+
+def remaining(subscription: Subscription) -> str:
+    """Сколько осталось, словами. Округление — к ближайшему.
+
+    Раньше остаток обрезался вниз, и это давало сразу две ошибки. Напоминание
+    за два часа уходило, когда до конца оставалось 1 ч 58 мин, обрезалось до
+    единицы и говорило «1 час» — на час меньше правды. А следующее, настоящее
+    часовое напоминание говорило ровно то же самое, и человек дважды подряд
+    читал одно и то же.
+
+    Округление вниз задумывалось как «не обещать больше, чем есть». Но
+    ошибалось оно не в пользу человека, а против: пугало концом раньше срока и
+    делало два разных напоминания неразличимыми. К ближайшему — и текст
+    совпадает с тем смещением, ради которого напоминание отправлено.
+    """
+    minutes_left = (subscription.expires_at - now()).total_seconds() / 60
+    if minutes_left >= DAYS_THRESHOLD_MINUTES:
+        return texts.plural_days(round(minutes_left / (24 * 60)))
+    # Не меньше часа: «осталось 0 часов» человеку ничего не говорит, а
+    # напоминание за час приходит, когда остаётся чуть меньше часа.
+    return texts.plural_hours(max(1, round(minutes_left / 60)))
+
+
 def build_text(subscription: Subscription) -> str:
     """Текст напоминания.
 
-    «Осталось» считаем по реальному времени до конца, а не по номиналу
+    Остаток считаем по реальному времени до конца, а не по номиналу
     сработавшего смещения. Смещение — только повод отправить: после продления
     ближайшим сработавшим оказывается самое дальнее из них, и человек с двумя
     сутками в запасе получал «осталось 7 дней» рядом с верной датой.
 
-    Округляем вниз: обещать времени больше, чем есть, в напоминании об
-    окончании — ровно та ошибка, от которой оно должно защищать.
+    Абсолютной даты в тексте нет: окончание округляется к 20:00 по Москве, а
+    часовой пояс человека Telegram нам не сообщает.
     """
-    plan_title = texts.plural_devices(subscription.plan.device_limit)
-    hours_left = (subscription.expires_at - now()).total_seconds() / 3600
-    if hours_left >= 24:
-        left = texts.plural_days(int(hours_left // 24))
-    else:
-        left = texts.plural_hours(max(1, int(hours_left)))
     return texts.REMINDER.format(
-        left=left,
-        # Время локальное: в базе оно в UTC, и без перевода человек читал бы
-        # «до 20:00» как «до 17:00».
-        until=localtime(subscription.expires_at).strftime("%d.%m в %H:%M"),
-        plan=plan_title,
+        left=remaining(subscription),
+        plan=texts.plural_devices(subscription.plan.device_limit),
     )
 
 
