@@ -80,6 +80,13 @@ async def handle_expired_step(
         return
 
     if step == "pick":
+        # Устройств может оказаться больше, чем в новом тарифе. Тогда сначала
+        # разбираемся с ними: панель лишние сама не выбрасывает, и без этого
+        # человек оказался бы в состоянии «Занято: 3 из 1».
+        from bot.handlers.trim import show_warning
+
+        if await show_warning(call, user, callback_data.device_limit):
+            return
         try:
             await change_plan_free(user, callback_data.device_limit)
         except SubscriptionError as error:

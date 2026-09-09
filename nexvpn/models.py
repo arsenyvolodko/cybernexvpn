@@ -231,6 +231,31 @@ class DeviceConnectionWatch(models.Model):
         return f"{self.user_id}: ждём устройство с {self.created_at:%H:%M}"
 
 
+class PlanChangeSelection(models.Model):
+    """Какие устройства человек отметил на удаление при переходе на меньший тариф.
+
+    В базе, а не в состоянии диалога, по той же причине, что и
+    `DeviceConnectionWatch`: любое нажатие кнопки сбрасывает FSM (см.
+    `StateResetMiddleware`), а выбор должен пережить и нажатия, и перезапуск
+    бота. Экран остаётся рабочим, даже если человек вернулся к нему через час.
+
+    Строка одна на человека: начал выбирать заново — прошлый выбор не нужен.
+    Живёт до применения или до следующей попытки, отдельная уборка не требуется.
+    """
+
+    user = models.OneToOneField(NexUser, on_delete=models.CASCADE, related_name="plan_change_selection")
+    new_plan = models.ForeignKey(Plan, on_delete=models.CASCADE)
+    selected = models.JSONField(default=list, help_text="HWID, отмеченные на удаление")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "выбор устройств при смене тарифа"
+        verbose_name_plural = "Выбор устройств при смене тарифа"
+
+    def __str__(self):
+        return f"{self.user_id}: {self.new_plan.device_limit} устр., выбрано {len(self.selected)}"
+
+
 class SubscriptionEvent(models.Model):
     """Журнал дней. Любое изменение expires_at или тарифа оставляет здесь запись."""
 

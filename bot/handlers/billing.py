@@ -155,13 +155,21 @@ async def handle_plan_details(call: CallbackQuery, callback_data: PlanCallback, 
 
 @router.callback_query(PlanCallback.filter(F.action == "free"))
 async def handle_plan_free(call: CallbackQuery, callback_data: PlanCallback, user: NexUser) -> None:
+    from bot.handlers.trim import show_warning
+
+    # Тот же разговор про лишние устройства, что и в коротком сценарии:
+    # переход на меньший тариф не должен оставлять человека с устройствами,
+    # которые он не может ни использовать, ни заменить.
+    await call.answer()
+    if await show_warning(call, user, callback_data.device_limit):
+        return
+
     try:
         subscription = await change_plan_free(user, callback_data.device_limit)
     except SubscriptionError as exc:
         await call.answer(str(exc), show_alert=True)
         return
 
-    await call.answer()
     if subscription.next_plan_id is not None:
         text = texts.PLAN_DOWNGRADE_SCHEDULED.format(
             plan=texts.plural_devices(subscription.next_plan.device_limit),

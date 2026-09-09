@@ -42,6 +42,13 @@ class ExpiredCallback(CallbackData, prefix="exp"):
     device_limit: int = 0
 
 
+class TrimCallback(CallbackData, prefix="trim"):
+    """Удаление лишних устройств при переходе на меньший тариф."""
+
+    action: str  # warn | auto | manual | toggle | apply
+    token: str = ""
+
+
 class FaqCallback(CallbackData, prefix="faq"):
     topic: str
 

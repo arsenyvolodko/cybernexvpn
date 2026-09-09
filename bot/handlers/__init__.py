@@ -12,6 +12,7 @@ from bot.handlers import (
     menu,
     referral,
     subscription,
+    trim,
     support,
 )
 
@@ -29,6 +30,7 @@ def build_router() -> Router:
     # Раньше billing: у истёкшей подписки свой короткий сценарий.
     root.include_router(expired.router)
     root.include_router(devices.router)
+    root.include_router(trim.router)
     root.include_router(referral.router)
     root.include_router(faq.router)
     root.include_router(support.router)

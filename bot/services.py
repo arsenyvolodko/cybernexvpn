@@ -23,6 +23,7 @@ from nexvpn.models import (
     NexUser,
     Payment,
     Plan,
+    PlanChangeSelection,
     Subscription,
     SubscriptionEvent,
     UserInvitation,
@@ -434,6 +435,154 @@ def start_plan_change_payment(user: NexUser, device_limit: int, return_url: str)
         return_url=return_url,
     )
     return created.url
+
+
+@dataclass
+class TrimPlan:
+    """Что придётся сделать с устройствами при переходе на меньший тариф."""
+
+    new_plan: Plan
+    devices: list[Device]        # все, свежие сверху
+    limit: int                   # сколько можно на новом тарифе
+    selected: list[str]          # отмеченные на удаление, HWID
+
+    @property
+    def to_remove(self) -> int:
+        return max(0, len(self.devices) - self.limit)
+
+    @property
+    def left_to_pick(self) -> int:
+        return max(0, self.to_remove - len(self.selected))
+
+    @property
+    def oldest(self) -> list[Device]:
+        """Кого снесёт автоудаление: самые давно неактивные.
+
+        Порядок тот же, что у `trim_devices_to_limit`, — свежие остаются.
+        Показываем их человеку списком, чтобы кнопка «удалить автоматически»
+        не была прыжком в неизвестность.
+        """
+        return self.devices[self.limit:] if self.to_remove else []
+
+
+@sync_to_async
+def get_trim_plan(user: NexUser, device_limit: int | None = None) -> TrimPlan | None:
+    """Нужно ли что-то удалять при переходе. None — панель не ответила.
+
+    `device_limit` не задан — берём выбор, сохранённый ранее: между нажатиями
+    человек ходит по экранам, и таскать тариф в каждой кнопке незачем.
+    """
+    selection = PlanChangeSelection.objects.select_related("new_plan").filter(user=user).first()
+    if device_limit is None:
+        if selection is None:
+            return None
+        plan = selection.new_plan
+    else:
+        plan = Plan.objects.get(device_limit=device_limit, is_active=True)
+
+    subscription = Subscription.objects.filter(user=user).first()
+    if subscription is None:
+        return None
+    try:
+        raw = panel_sync.list_devices(subscription)
+    except RemnawaveError as exc:
+        logger.warning("Панель не отдала устройства для %s: %s", user.pk, exc)
+        return None
+
+    raw.sort(key=lambda d: d.get("updatedAt") or d.get("createdAt") or "", reverse=True)
+    devices = [
+        Device(
+            hwid=item["hwid"],
+            token=_device_token(item["hwid"]),
+            title=_device_title(item),
+            platform=item.get("platform"),
+            last_seen=(item.get("updatedAt") or item.get("createdAt") or "")[:10] or None,
+        )
+        for item in raw
+    ]
+    known = {device.hwid for device in devices}
+    selected = [
+        hwid for hwid in (selection.selected if selection and selection.new_plan_id == plan.pk else [])
+        if hwid in known  # устройство могли удалить в другом окне
+    ]
+    return TrimPlan(new_plan=plan, devices=devices, limit=plan.device_limit, selected=selected)
+
+
+@sync_to_async
+def remember_trim_target(user: NexUser, device_limit: int) -> None:
+    """Запомнить, на какой тариф человек переходит. Выбор начинается заново."""
+    plan = Plan.objects.get(device_limit=device_limit, is_active=True)
+    PlanChangeSelection.objects.update_or_create(
+        user=user, defaults={"new_plan": plan, "selected": []}
+    )
+
+
+@sync_to_async
+def toggle_trim_device(user: NexUser, token: str) -> None:
+    """Отметить устройство на удаление или снять отметку."""
+    selection = PlanChangeSelection.objects.filter(user=user).first()
+    if selection is None:
+        return
+    subscription = Subscription.objects.filter(user=user).first()
+    if subscription is None:
+        return
+    try:
+        raw = panel_sync.list_devices(subscription)
+    except RemnawaveError:
+        return
+    hwid = next((item["hwid"] for item in raw if _device_token(item["hwid"]) == token), None)
+    if hwid is None:
+        return
+
+    selected = list(selection.selected)
+    if hwid in selected:
+        selected.remove(hwid)
+    else:
+        selected.append(hwid)
+    selection.selected = selected
+    selection.save(update_fields=["selected"])
+
+
+@sync_to_async
+def apply_trim_and_change(user: NexUser, hwids: list[str] | None = None) -> Subscription:
+    """Удалить устройства и перейти на новый тариф.
+
+    Сначала устройства, потом тариф: если панель откажет на удалении, человек
+    останется на прежнем тарифе со своими устройствами — это понятное
+    состояние. Обратный порядок оставил бы его на меньшем тарифе с лишними
+    устройствами, то есть ровно в той поломке, от которой мы и уходим.
+    """
+    selection = PlanChangeSelection.objects.select_related("new_plan").get(user=user)
+    subscription = Subscription.objects.select_related("plan").get(user=user)
+
+    if hwids is None:
+        hwids = list(selection.selected)
+    for hwid in hwids:
+        panel_sync.remove_device(subscription, hwid)
+
+    plan = selection.new_plan
+    selection.delete()
+    if plan.price_month < subscription.plan.price_month and subscription.is_active:
+        result = service.schedule_plan_downgrade(user, plan)
+    else:
+        result = service.change_plan_now(user, plan)
+    _sync_quietly(result)
+    return result
+
+
+@sync_to_async
+def auto_trim_hwids(user: NexUser) -> list[str]:
+    """HWID, которые снесёт автоудаление: самые давно неактивные."""
+    selection = PlanChangeSelection.objects.select_related("new_plan").filter(user=user).first()
+    subscription = Subscription.objects.filter(user=user).first()
+    if selection is None or subscription is None:
+        return []
+    try:
+        raw = panel_sync.list_devices(subscription)
+    except RemnawaveError:
+        return []
+    raw.sort(key=lambda d: d.get("updatedAt") or d.get("createdAt") or "", reverse=True)
+    return [item["hwid"] for item in raw[selection.new_plan.device_limit:]]
 
 
 @sync_to_async

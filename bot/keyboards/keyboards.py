@@ -13,6 +13,7 @@ from bot.keyboards.button import Button
 from bot.keyboards.factories import (
     ConnectCallback,
     ExpiredCallback,
+    TrimCallback,
     DeviceCallback,
     FaqCallback,
     PlanCallback,
@@ -142,6 +143,44 @@ def expired_plans(options) -> InlineKeyboardMarkup:
         if not option.is_current
     ]
     return _rows(*items, back_to=EXPIRED_HOME, with_menu=False)
+
+
+def trim_warning() -> InlineKeyboardMarkup:
+    """Выбор способа: снести самые давние автоматически или отобрать вручную."""
+    return _rows(
+        InlineKeyboardButton(
+            text="Удалить автоматически 🧹",
+            callback_data=TrimCallback(action="auto").pack(),
+        ),
+        InlineKeyboardButton(
+            text="Выбрать самому 👆",
+            callback_data=TrimCallback(action="manual").pack(),
+        ),
+        back_to=SUBSCRIPTION,
+        with_menu=False,
+    )
+
+
+def trim_pick(devices, selected: set[str]) -> InlineKeyboardMarkup:
+    """Список устройств: отмеченные красные.
+
+    Красный — не украшение: у Telegram есть стиль кнопки, и им видно, что
+    выбрано, без чтения текста над списком.
+    """
+    items = [
+        InlineKeyboardButton(
+            text=("✖ " if device.hwid in selected else "") + device.title,
+            callback_data=TrimCallback(action="toggle", token=device.token).pack(),
+            style="danger" if device.hwid in selected else None,
+        )
+        for device in devices
+    ]
+    items.append(
+        InlineKeyboardButton(
+            text="Применить", callback_data=TrimCallback(action="apply").pack(), style="success"
+        )
+    )
+    return _rows(*items, back_to=TrimCallback(action="warn").pack(), with_menu=False)
 
 
 def expired_changed() -> InlineKeyboardMarkup:
