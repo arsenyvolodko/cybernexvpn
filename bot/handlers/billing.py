@@ -167,15 +167,6 @@ async def handle_plan_free(call: CallbackQuery, callback_data: PlanCallback, use
             plan=texts.plural_devices(subscription.next_plan.device_limit),
             date=subscription.expires_at.strftime("%d.%m.%Y"),
         )
-    elif not subscription.is_active:
-        # Подписка истекла: остатка дней нет, и говорить про него нечего.
-        # Человек только что выбрал тариф — теперь ему нужна оплата, а рядом
-        # возможность передумать, если ткнул не туда.
-        text = texts.PLAN_CHANGED_EXPIRED.format(
-            plan=texts.plural_devices(subscription.plan.device_limit)
-        )
-        await render(call, text, keyboards.expired())
-        return
     else:
         text = texts.PLAN_CHANGED.format(
             plan=texts.plural_devices(subscription.plan.device_limit),

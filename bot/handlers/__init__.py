@@ -7,6 +7,7 @@ from bot.handlers import (
     channel,
     connect,
     devices,
+    expired,
     faq,
     menu,
     referral,
@@ -25,6 +26,8 @@ def build_router() -> Router:
     root.include_router(subscription.router)
     root.include_router(connect.router)
     root.include_router(billing.router)
+    # Раньше billing: у истёкшей подписки свой короткий сценарий.
+    root.include_router(expired.router)
     root.include_router(devices.router)
     root.include_router(referral.router)
     root.include_router(faq.router)

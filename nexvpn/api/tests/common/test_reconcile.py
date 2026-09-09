@@ -54,6 +54,12 @@ def patch_yookassa(monkeypatch, status="succeeded", ok=True):
 
     monkeypatch.setattr("nexvpn.subscription.reconcile.requests.get", fake_get)
     monkeypatch.setattr("nexvpn.subscription.panel_sync.sync_subscription", lambda *a, **kw: True)
+    # Транспорт до Telegram — тоже заглушкой. Логику уведомления при этом
+    # трогать нельзя: часть тестов ниже как раз её и проверяет, подменяя
+    # `notify_payment_applied`. Затыкаем на уровень ниже, у самого запроса.
+    # Без этого прогон слал настоящий запрос в Telegram с боевым токеном из
+    # локального .env — вскрылось, только когда тестам закрыли сеть.
+    monkeypatch.setattr("bot.notify._api", lambda method, payload: True)
     return calls
 
 

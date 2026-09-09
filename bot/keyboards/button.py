@@ -35,12 +35,20 @@ class Button:
         return self.name.lower() + self.callback_suffix
 
     def get_button(self, **kwargs) -> InlineKeyboardButton:
+        """Кнопка. `callback_data` можно переопределить.
+
+        Переопределение нужно там, где действие то же, а ведёт оно в другой
+        сценарий: «Продлить подписку» у истёкшей подписки идёт в короткий
+        путь, а не в общий. Раньше этот аргумент молча игнорировался, и кнопка
+        выглядела правильной, но вела не туда.
+        """
         text = kwargs.get("text", self.txt)
         style = kwargs.get("style", self.style)
         url = kwargs.get("url")
         if url:
             return InlineKeyboardButton(text=text, url=url, style=style)
-        return InlineKeyboardButton(text=text, callback_data=self.callback, style=style)
+        callback_data = kwargs.get("callback_data", self.callback)
+        return InlineKeyboardButton(text=text, callback_data=callback_data, style=style)
 
 
 class AutoNameButtonMeta(type):

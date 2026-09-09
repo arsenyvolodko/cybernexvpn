@@ -29,6 +29,19 @@ class PlanCallback(CallbackData, prefix="plan"):
     action: str  # open | free | pay
 
 
+class ExpiredCallback(CallbackData, prefix="exp"):
+    """Короткий сценарий для истёкшей подписки.
+
+    Отдельный от `PlanCallback` и `RenewCallback` намеренно: у истёкшей
+    подписки нет остатка дней, нечего пересчитывать и не о чем спрашивать —
+    человеку нужно за два нажатия выбрать тариф и заплатить. Общий сценарий
+    с подтверждениями и выбором «бесплатно или с доплатой» здесь только мешает.
+    """
+
+    step: str  # home | renew | plans | pick | renew_final
+    device_limit: int = 0
+
+
 class FaqCallback(CallbackData, prefix="faq"):
     topic: str
 

@@ -12,6 +12,7 @@ from bot.apps_catalog import CATALOG, Platform
 from bot.keyboards.button import Button
 from bot.keyboards.factories import (
     ConnectCallback,
+    ExpiredCallback,
     DeviceCallback,
     FaqCallback,
     PlanCallback,
@@ -26,22 +27,22 @@ def _back_button(target: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(text=BACK_TEXT, callback_data=target)
 
 
-def _nav_row(back_to: str) -> list[InlineKeyboardButton]:
+def _nav_row(back_to: str, with_menu: bool = True) -> list[InlineKeyboardButton]:
     row = [_back_button(back_to)]
     # Если «Назад» и так ведёт в меню, вторая кнопка была бы дубликатом.
-    if back_to != MENU:
+    if with_menu and back_to != MENU:
         row.append(ButtonsStorage.MAIN_MENU.get_button())
     return row
 
 
-def _rows(*items, back_to: str | None = None) -> InlineKeyboardMarkup:
+def _rows(*items, back_to: str | None = None, with_menu: bool = True) -> InlineKeyboardMarkup:
     keyboard = [
         [item.get_button() if isinstance(item, Button) else item]
         for item in items
         if item is not None
     ]
     if back_to:
-        keyboard.append(_nav_row(back_to))
+        keyboard.append(_nav_row(back_to, with_menu))
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
@@ -80,6 +81,25 @@ def only_back(back_to: str = MENU) -> InlineKeyboardMarkup:
     return _rows(back_to=back_to)
 
 
+EXPIRED_HOME = ExpiredCallback(step="home").pack()
+
+
+def _expired_actions() -> list[InlineKeyboardButton]:
+    """Две кнопки истёкшей подписки, ведущие в короткий сценарий.
+
+    Именно в короткий, а не в общий: у истёкшей подписки нет остатка дней, и
+    подтверждения с выбором «бесплатно или с доплатой» человеку тут не нужны.
+    """
+    return [
+        ButtonsStorage.RENEW.get_button(
+            callback_data=ExpiredCallback(step="renew").pack()
+        ),
+        ButtonsStorage.CHANGE_PLAN.get_button(
+            callback_data=ExpiredCallback(step="plans").pack()
+        ),
+    ]
+
+
 def ended() -> InlineKeyboardMarkup:
     """Под сообщением о том, что подписка кончилась.
 
@@ -87,18 +107,50 @@ def ended() -> InlineKeyboardMarkup:
     сообщение, которое пришло к нему само. Возвращать его некуда — позади
     ничего нет, а кнопка предлагала бы уйти вместо того, чтобы продлить.
     """
-    return _rows(ButtonsStorage.RENEW, ButtonsStorage.CHANGE_PLAN)
+    return _rows(*_expired_actions())
 
 
 def expired() -> InlineKeyboardMarkup:
-    """Что делать человеку с закончившейся подпиской: продлить или сменить тариф.
+    """То же самое, но там, куда человек пришёл сам, — с возвратом в меню."""
+    return _rows(*_expired_actions(), back_to=MENU)
 
-    Смена тарифа здесь не лишняя, хотя раньше её прятали. Момент окончания —
-    как раз когда человек решает, нужно ли ему столько устройств; заставлять
-    его сначала продлить старый тариф, чтобы потом сменить, значит просить
-    заплатить не за то, что он хочет.
+
+def expired_renew(options) -> InlineKeyboardMarkup:
+    """Сроки продления. «Назад» ведёт к сообщению об окончании, а не в меню."""
+    # Только «Назад», без «В меню»: сценарий короткий и линейный, лишний
+    # выход из него по дороге к оплате ни к чему.
+    return _rows(*_renew_buttons(options), back_to=EXPIRED_HOME, with_menu=False)
+
+
+def expired_renew_final(options) -> InlineKeyboardMarkup:
+    """То же, но без «Назад»: сюда человек попадает уже выбрав тариф.
+
+    Возвращать его к экрану «тариф сменён» незачем — там нет ничего, кроме
+    предложения оплатить, а он именно это и делает.
     """
-    return _rows(ButtonsStorage.RENEW, ButtonsStorage.CHANGE_PLAN, back_to=MENU)
+    return _rows(*_renew_buttons(options))
+
+
+def expired_plans(options) -> InlineKeyboardMarkup:
+    """Тарифы. Нажатие применяет выбор сразу, без экрана подтверждения."""
+    items = [
+        InlineKeyboardButton(
+            text=f"{option.name} — {option.price_month}₽/мес",
+            callback_data=ExpiredCallback(step="pick", device_limit=option.device_limit).pack(),
+        )
+        for option in options
+        if not option.is_current
+    ]
+    return _rows(*items, back_to=EXPIRED_HOME, with_menu=False)
+
+
+def expired_changed() -> InlineKeyboardMarkup:
+    """После смены тарифа остаётся ровно одно действие — заплатить."""
+    return _rows(
+        ButtonsStorage.RENEW.get_button(
+            callback_data=ExpiredCallback(step="renew_final").pack()
+        )
+    )
 
 
 def subscription(*, is_active: bool, web_url: str | None, can_add_device: bool) -> InlineKeyboardMarkup:
@@ -106,9 +158,16 @@ def subscription(*, is_active: bool, web_url: str | None, can_add_device: bool) 
     кнопка, которая гарантированно откажет, хуже её отсутствия. А вот сменить
     тариф в этот момент как раз естественно — человек решает, за что платить."""
     items: list = []
-    if is_active:
-        items.append(ButtonsStorage.CONNECT if can_add_device else None)
-        items.append(ButtonsStorage.MY_DEVICES)
+    if not is_active:
+        # Истёкшая подписка ведёт в короткий сценарий: без пересчёта остатка
+        # и подтверждений, которым тут неоткуда взяться.
+        items.extend(_expired_actions())
+        if web_url:
+            items.append(InlineKeyboardButton(text=ButtonsStorage.WEB_VERSION.text, url=web_url))
+        return _rows(*items, back_to=MENU)
+
+    items.append(ButtonsStorage.CONNECT if can_add_device else None)
+    items.append(ButtonsStorage.MY_DEVICES)
     items.append(ButtonsStorage.CHANGE_PLAN)
     items.append(ButtonsStorage.RENEW)
     if web_url:
@@ -227,7 +286,7 @@ def reminder() -> InlineKeyboardMarkup:
     return _rows(ButtonsStorage.RENEW, ButtonsStorage.MY_SUBSCRIPTION)
 
 
-def renew(options) -> InlineKeyboardMarkup:
+def _renew_buttons(options) -> list[InlineKeyboardButton]:
     """Сроки со скидкой. Выгода прямо в кнопке — иначе её никто не заметит."""
     items = []
     for option in options:
@@ -237,7 +296,11 @@ def renew(options) -> InlineKeyboardMarkup:
         items.append(
             InlineKeyboardButton(text=label, callback_data=RenewCallback(months=option.months).pack())
         )
-    return _rows(*items, back_to=SUBSCRIPTION)
+    return items
+
+
+def renew(options) -> InlineKeyboardMarkup:
+    return _rows(*_renew_buttons(options), back_to=SUBSCRIPTION)
 
 
 def plan_list(options) -> InlineKeyboardMarkup:
