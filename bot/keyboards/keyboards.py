@@ -80,14 +80,36 @@ def only_back(back_to: str = MENU) -> InlineKeyboardMarkup:
     return _rows(back_to=back_to)
 
 
+def ended() -> InlineKeyboardMarkup:
+    """Под сообщением о том, что подписка кончилась.
+
+    Без «Назад» намеренно: это не экран, на который человек пришёл, а
+    сообщение, которое пришло к нему само. Возвращать его некуда — позади
+    ничего нет, а кнопка предлагала бы уйти вместо того, чтобы продлить.
+    """
+    return _rows(ButtonsStorage.RENEW, ButtonsStorage.CHANGE_PLAN)
+
+
+def expired() -> InlineKeyboardMarkup:
+    """Что делать человеку с закончившейся подпиской: продлить или сменить тариф.
+
+    Смена тарифа здесь не лишняя, хотя раньше её прятали. Момент окончания —
+    как раз когда человек решает, нужно ли ему столько устройств; заставлять
+    его сначала продлить старый тариф, чтобы потом сменить, значит просить
+    заплатить не за то, что он хочет.
+    """
+    return _rows(ButtonsStorage.RENEW, ButtonsStorage.CHANGE_PLAN, back_to=MENU)
+
+
 def subscription(*, is_active: bool, web_url: str | None, can_add_device: bool) -> InlineKeyboardMarkup:
-    """У истёкшей подписки «Подключиться» и «Сменить тариф» смысла не имеют —
-    сначала продление. Кнопка, которая гарантированно откажет, хуже её отсутствия."""
+    """«Подключиться» и «Мои устройства» у истёкшей подписки не показываем:
+    кнопка, которая гарантированно откажет, хуже её отсутствия. А вот сменить
+    тариф в этот момент как раз естественно — человек решает, за что платить."""
     items: list = []
     if is_active:
         items.append(ButtonsStorage.CONNECT if can_add_device else None)
         items.append(ButtonsStorage.MY_DEVICES)
-        items.append(ButtonsStorage.CHANGE_PLAN)
+    items.append(ButtonsStorage.CHANGE_PLAN)
     items.append(ButtonsStorage.RENEW)
     if web_url:
         items.append(InlineKeyboardButton(text=ButtonsStorage.WEB_VERSION.text, url=web_url))

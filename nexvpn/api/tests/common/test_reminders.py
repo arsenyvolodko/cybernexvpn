@@ -248,3 +248,111 @@ def test_one_hour_reads_correctly(plan):
 
     assert "До окончания: 1 час" in text
     assert "Осталось 1 час" not in text
+
+
+# --- сообщение в момент окончания ---
+
+
+@override_settings(SUBSCRIPTION_REMINDER_HOURS=OFFSETS)
+def test_expired_subscription_gets_a_notice(plan):
+    from bot.notifications import due_expiry_notices
+
+    subscription = expiring_in(-2, plan)
+
+    assert [s.pk for s in due_expiry_notices()] == [subscription.pk]
+
+
+@override_settings(SUBSCRIPTION_REMINDER_HOURS=OFFSETS)
+def test_active_subscription_gets_no_notice(plan):
+    from bot.notifications import due_expiry_notices
+
+    expiring_in(5, plan)
+
+    assert due_expiry_notices() == []
+
+
+@override_settings(SUBSCRIPTION_REMINDER_HOURS=OFFSETS)
+def test_long_expired_is_left_alone(plan):
+    """Писать «подписка закончилась» через две недели поздно и странно.
+
+    Это же окно защищает от разовой рассылки всем истёкшим при первом выкате.
+    """
+    from bot.notifications import due_expiry_notices
+
+    expiring_in(-24 * 14, plan)
+
+    assert due_expiry_notices() == []
+
+
+@override_settings(SUBSCRIPTION_REMINDER_HOURS=OFFSETS)
+def test_notice_is_sent_once(plan):
+    from bot.notifications import EXPIRY_OFFSET, due_expiry_notices
+
+    subscription = expiring_in(-2, plan)
+    SentReminder.objects.create(
+        subscription=subscription, hours_before=EXPIRY_OFFSET, expires_at=subscription.expires_at
+    )
+
+    assert due_expiry_notices() == []
+
+
+@override_settings(SUBSCRIPTION_REMINDER_HOURS=OFFSETS)
+def test_renewal_makes_the_notice_possible_again(plan):
+    """Продлил — значит следующий конец периода снова стоит отметить."""
+    from bot.notifications import EXPIRY_OFFSET, due_expiry_notices
+
+    subscription = expiring_in(-2, plan)
+    SentReminder.objects.create(
+        subscription=subscription, hours_before=EXPIRY_OFFSET, expires_at=subscription.expires_at
+    )
+
+    service.grant_days(subscription.user, 30, SubscriptionEventReasonEnum.PURCHASE)
+    Subscription.objects.filter(pk=subscription.pk).update(expires_at=now() - timedelta(hours=1))
+
+    assert [s.pk for s in due_expiry_notices()] == [subscription.pk]
+
+
+def test_expired_keyboard_offers_renew_and_change(plan):
+    from bot.keyboards import keyboards
+
+    texts_on = [b.text for row in keyboards.expired().inline_keyboard for b in row]
+
+    assert any("Продлить" in t for t in texts_on)
+    assert any("Сменить тариф" in t for t in texts_on)
+
+
+def test_subscription_screen_offers_change_plan_when_expired():
+    """Момент окончания — как раз когда человек решает, сколько устройств ему надо."""
+    from bot.keyboards import keyboards
+
+    keyboard = keyboards.subscription(is_active=False, web_url=None, can_add_device=False)
+    labels = [b.text for row in keyboard.inline_keyboard for b in row]
+
+    assert any("Сменить тариф" in t for t in labels)
+    assert any("Продлить" in t for t in labels)
+    assert not any("Подключиться" in t for t in labels), "кнопка, которая откажет, тут не нужна"
+
+
+@override_settings(SUBSCRIPTION_REMINDER_HOURS=OFFSETS)
+def test_yesterdays_expiry_is_out_of_the_window(plan):
+    """Окно — двенадцать часов. Вчерашним «доступ приостановлен» уже поздно."""
+    from bot.notifications import due_expiry_notices
+
+    expiring_in(-24, plan)
+
+    assert due_expiry_notices() == []
+
+
+def test_ended_message_has_no_back_button():
+    """Это не экран, куда человек пришёл, а сообщение, которое пришло к нему.
+
+    «Назад» уводило бы вместо того, чтобы дать продлить.
+    """
+    from bot.keyboards import keyboards
+
+    labels = [b.text for row in keyboards.ended().inline_keyboard for b in row]
+
+    assert not any("Назад" in label for label in labels)
+    assert not any("меню" in label.lower() for label in labels)
+    assert any("Продлить" in label for label in labels)
+    assert any("Сменить тариф" in label for label in labels)

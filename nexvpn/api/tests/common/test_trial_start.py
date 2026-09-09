@@ -121,3 +121,58 @@ def test_trial_available_is_false_once_a_subscription_exists(trial_plan):
     subscription = SubscriptionFactory(plan=trial_plan)
 
     assert service.trial_available(subscription.user) is False
+
+
+# --- истёкшая подписка: путь вперёд, а не только «назад» ---
+
+
+def test_connect_screen_offers_a_way_forward_when_expired(trial_plan):
+    """Человек пришёл подключаться. Тупик с одной кнопкой «назад» — плохой ответ."""
+    subscription = SubscriptionFactory(
+        plan=trial_plan, expires_at=__import__("django.utils.timezone", fromlist=["now"]).now()
+        - __import__("datetime").timedelta(days=1)
+    )
+
+    text, keyboard = async_to_sync(connect_screen)(subscription.user)
+
+    labels = [b.text for row in keyboard.inline_keyboard for b in row]
+    assert text == texts.CONNECT_NEEDS_SUBSCRIPTION
+    assert any("Продлить" in label for label in labels)
+    assert any("Сменить тариф" in label for label in labels)
+
+
+def test_downgrade_on_an_expired_subscription_applies_at_once(trial_plan, monkeypatch):
+    """Откладывать некуда: оплаченного периода нет, и отсрочка показала бы
+    «перейдёшь с 05.09» с прошедшей датой."""
+    import datetime as dt
+
+    from django.utils.timezone import now
+
+    from bot.services import change_plan_free
+    from nexvpn.api.tests.factories import PlanFactory
+
+    cheaper = PlanFactory(device_limit=1, price_month=150)
+    subscription = SubscriptionFactory(plan=trial_plan, expires_at=now() - dt.timedelta(days=1))
+
+    result = async_to_sync(change_plan_free)(subscription.user, cheaper.device_limit)
+
+    assert result.plan_id == cheaper.pk, "тариф должен смениться сразу"
+    assert result.next_plan_id is None, "ничего откладывать не нужно"
+
+
+def test_downgrade_on_an_active_subscription_is_still_deferred(trial_plan):
+    """А вот у живой подписки отсрочка остаётся: устройства оплачены."""
+    import datetime as dt
+
+    from django.utils.timezone import now
+
+    from bot.services import change_plan_free
+    from nexvpn.api.tests.factories import PlanFactory
+
+    cheaper = PlanFactory(device_limit=1, price_month=150)
+    subscription = SubscriptionFactory(plan=trial_plan, expires_at=now() + dt.timedelta(days=20))
+
+    result = async_to_sync(change_plan_free)(subscription.user, cheaper.device_limit)
+
+    assert result.plan_id == trial_plan.pk, "текущий тариф до конца периода не трогаем"
+    assert result.next_plan_id == cheaper.pk

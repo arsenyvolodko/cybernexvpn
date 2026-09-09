@@ -68,7 +68,9 @@ async def connect_screen(user: NexUser):
     if not view.exists:
         return texts.SUBSCRIPTION_NONE, keyboards.only_back()
     if not view.is_active:
-        return texts.CONNECT_NEEDS_SUBSCRIPTION, keyboards.only_back()
+        # Не только «назад»: человек пришёл подключаться, и ему нужен путь
+        # вперёд — продлить или сменить тариф, если старый не подошёл.
+        return texts.CONNECT_NEEDS_SUBSCRIPTION, keyboards.expired()
     if not view.can_add_device:
         # Панель всё равно откажет новому устройству — честнее сказать заранее.
         return texts.CONNECT_NO_SLOTS.format(limit=view.device_limit), keyboards.only_back()

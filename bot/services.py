@@ -438,10 +438,16 @@ def start_plan_change_payment(user: NexUser, device_limit: int, return_url: str)
 
 @sync_to_async
 def change_plan_free(user: NexUser, device_limit: int) -> Subscription:
-    """Бесплатный переход: повышение с пересчётом остатка или отложенное понижение."""
+    """Бесплатный переход: повышение с пересчётом остатка или отложенное понижение.
+
+    У **истёкшей** подписки понижение откладывать некуда и незачем. Смысл
+    отсрочки — не забирать досрочно устройства, за которые человек заплатил;
+    когда оплаченный период кончился, забирать нечего. А отложенный переход
+    показал бы «перейдёшь с 05.09» с прошедшей датой.
+    """
     plan = Plan.objects.get(device_limit=device_limit, is_active=True)
     subscription = Subscription.objects.select_related("plan").get(user=user)
-    if plan.price_month < subscription.plan.price_month:
+    if plan.price_month < subscription.plan.price_month and subscription.is_active:
         result = service.schedule_plan_downgrade(user, plan)
     else:
         result = service.change_plan_now(user, plan)

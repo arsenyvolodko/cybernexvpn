@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 @shared_task()
 def send_subscription_reminders():
-    """Напомнить об окончании подписки.
+    """Напомнить о скором окончании подписки и сказать, когда она кончилась.
 
     Живёт в celery, а не в процессе бота: бот может перезапускаться при деплое,
     а напоминания пропускать нельзя. Бот здесь поднимается разово, только чтобы
@@ -30,7 +30,7 @@ def send_subscription_reminders():
     import asyncio
 
     from bot.main import build_bot
-    from bot.notifications import send_due_reminders
+    from bot.notifications import send_due_expiry_notices, send_due_reminders
     from nexvpn.models import GlobalSettings
 
     if not GlobalSettings.load().reminders_enabled:
@@ -42,14 +42,22 @@ def send_subscription_reminders():
     async def _run():
         bot = build_bot()
         try:
-            return await send_due_reminders(bot)
+            # Один поднятый бот на оба дела: экземпляр создаётся ради отправки
+            # и закрывается сразу, поднимать его дважды подряд незачем.
+            reminders = await send_due_reminders(bot)
+            expiry = await send_due_expiry_notices(bot)
+            return reminders, expiry
         finally:
             await bot.session.close()
 
-    sent, failed = asyncio.run(_run())
+    (sent, failed), (ended_sent, ended_failed) = asyncio.run(_run())
     if sent or failed:
         logger.info("Напоминания: отправлено %s, не доставлено %s", sent, failed)
-    return {"sent": sent, "failed": failed}
+    if ended_sent or ended_failed:
+        logger.info(
+            "Сообщения об окончании: отправлено %s, не доставлено %s", ended_sent, ended_failed
+        )
+    return {"sent": sent, "failed": failed, "ended": ended_sent, "ended_failed": ended_failed}
 
 
 @shared_task()

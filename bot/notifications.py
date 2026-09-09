@@ -10,6 +10,7 @@
 """
 
 import logging
+from datetime import timedelta
 
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from django.conf import settings
@@ -107,9 +108,77 @@ def _trial_subscription_ids(subscriptions: list[Subscription]) -> set[int]:
     }
 
 
-def _timedelta_hours(hours: int):
-    from datetime import timedelta
+# Смещение, под которым в `SentReminder` лежит отметка «сказали, что кончилась».
+# Ноль потому, что это не «за сколько-то до», а сам момент окончания. Отметка
+# живёт в той же таблице не для экономии: `grant_days` чистит её при продлении,
+# и уведомление об окончании автоматически становится возможным снова.
+EXPIRY_OFFSET = 0
 
+# Насколько назад смотрим. Задача ходит раз в десять минут, поэтому в обычной
+# жизни сообщение уходит почти сразу — окно нужно только чтобы догнать
+# пропущенное после простоя. Двенадцати часов на это хватает, а написать
+# «подписка приостановлена» тому, у кого это случилось позавчера, уже поздно.
+#
+# Обратная сторона: если бот пролежит дольше двенадцати часов, тех, кто истёк
+# в это время, мы пропустим совсем.
+EXPIRY_WINDOW = timedelta(hours=12)
+
+
+def due_expiry_notices() -> list[Subscription]:
+    """Кому пора сказать, что подписка кончилась.
+
+    Только тем, у кого это случилось недавно и кому мы ещё не говорили.
+    Повторно не скажем никогда: отметка снимается лишь продлением, а после
+    продления сообщение снова уместно — но уже про новый период.
+    """
+    moment = now()
+    subscriptions = (
+        Subscription.objects
+        .filter(expires_at__lte=moment, expires_at__gt=moment - EXPIRY_WINDOW)
+        .select_related("user", "plan")
+    )
+    already_told = set(
+        SentReminder.objects
+        .filter(hours_before=EXPIRY_OFFSET)
+        .values_list("subscription_id", flat=True)
+    )
+    return [s for s in subscriptions if s.pk not in already_told]
+
+
+async def send_due_expiry_notices(bot) -> tuple[int, int]:
+    """Разослать сообщения об окончании. Возвращает (отправлено, не доставлено)."""
+    import asyncio
+
+    from asgiref.sync import sync_to_async
+
+    pending = await sync_to_async(due_expiry_notices)()
+    if not pending:
+        return 0, 0
+
+    sent = failed = 0
+    for subscription in pending:
+        # Отметку ставим до отправки, как и у напоминаний: повторить
+        # пропущенное не страшно, а сказать дважды «подписка закончилась» —
+        # заметно и неприятно.
+        try:
+            await sync_to_async(SentReminder.objects.create)(
+                subscription=subscription,
+                hours_before=EXPIRY_OFFSET,
+                expires_at=subscription.expires_at,
+            )
+        except IntegrityError:
+            continue
+
+        if await _send(bot, subscription.user_id, texts.SUBSCRIPTION_ENDED, keyboards.ended()):
+            sent += 1
+        else:
+            failed += 1
+        await asyncio.sleep(DELAY_BETWEEN_MESSAGES)
+
+    return sent, failed
+
+
+def _timedelta_hours(hours: int):
     return timedelta(hours=hours)
 
 
@@ -192,7 +261,7 @@ async def send_due_reminders(bot) -> tuple[int, int]:
         except IntegrityError:
             continue
 
-        if await _send(bot, subscription.user_id, text):
+        if await _send(bot, subscription.user_id, text, keyboards.reminder()):
             sent += 1
         else:
             failed += 1
@@ -201,16 +270,16 @@ async def send_due_reminders(bot) -> tuple[int, int]:
     return sent, failed
 
 
-async def _send(bot, chat_id: int, text: str) -> bool:
+async def _send(bot, chat_id: int, text: str, keyboard) -> bool:
     import asyncio
 
     try:
-        await bot.send_message(chat_id, text, reply_markup=keyboards.reminder())
+        await bot.send_message(chat_id, text, reply_markup=keyboard)
         return True
     except TelegramRetryAfter as exc:
         await asyncio.sleep(exc.retry_after + 1)
         try:
-            await bot.send_message(chat_id, text, reply_markup=keyboards.reminder())
+            await bot.send_message(chat_id, text, reply_markup=keyboard)
             return True
         except TelegramAPIError:
             return False
