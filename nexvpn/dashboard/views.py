@@ -108,6 +108,23 @@ def users(request):
 
 
 @_staff_api
+def tunnels(request):
+    """Всё про туннели одним запросом: список, сети, операторы и динамика."""
+    period = periods.parse(request.GET)
+    metric = request.GET.get("tunnel_metric", "people")
+    if metric not in ("people", "connections"):
+        metric = "people"
+    return JsonResponse(
+        {
+            "tunnels": queries.tunnels(period),
+            "networks": queries.networks(period),
+            "operators": queries.operators(period),
+            "series": queries.tunnel_series(period, metric),
+        }
+    )
+
+
+@_staff_api
 def user_card(request, user_id: int):
     card = queries.user_card(user_id)
     if card is None:

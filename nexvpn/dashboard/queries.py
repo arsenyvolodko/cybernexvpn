@@ -23,6 +23,8 @@ from django.utils import timezone
 
 from nexvpn.enums.subscription_event_reason_enum import SubscriptionEventReasonEnum
 from nexvpn.models import (
+    InboundUsageDay,
+    RelayNetworkDay,
     NexUser,
     NodeUsageDay,
     Payment,
@@ -417,3 +419,205 @@ def _iso(value) -> str | None:
     if value is None:
         return None
     return timezone.localtime(value).isoformat()
+
+
+# ─────────────────────────────── туннели ───────────────────────────────
+
+# Названия профилей берутся из панели. Ходить туда на каждый клик по периоду
+# незачем: список меняется раз в неделю, а панель за Cloudflare и отвечает не
+# мгновенно. Держим недолгий кэш в памяти процесса.
+_PROFILE_CACHE: dict[str, object] = {"names": {}, "at": None}
+_PROFILE_TTL = dt.timedelta(minutes=10)
+
+
+def profile_names() -> dict[tuple[str, str, bool], str]:
+    """Как туннель называется для человека. Пустой словарь — не беда."""
+    from nexvpn import telemetry
+
+    fetched_at = _PROFILE_CACHE["at"]
+    if fetched_at is None or timezone.now() - fetched_at > _PROFILE_TTL:
+        try:
+            _PROFILE_CACHE["names"] = telemetry.profile_names()
+        except Exception:
+            # Панель недоступна — покажем технические теги. Страница со
+            # статистикой не должна зависеть от чужой доступности.
+            _PROFILE_CACHE["names"] = _PROFILE_CACHE["names"] or {}
+        _PROFILE_CACHE["at"] = timezone.now()
+    return _PROFILE_CACHE["names"]
+
+
+def _tunnel_title(names: dict, node: str, tag: str, via_relay: bool) -> str:
+    name = names.get((node, tag, via_relay))
+    if name:
+        return name
+    # Профиль мог быть удалён из подписки, а трафик по нему ещё идёт: у людей
+    # в приложениях остаются старые конфиги. Такие показываем тегом и метим.
+    return f"{tag} @ {node}{' через релей' if via_relay else ''}"
+
+
+def tunnels(period: Period) -> list[dict]:
+    """Туннели за период: сколько людей, сколько соединений, с каких сетей."""
+    names = profile_names()
+    rows = (
+        InboundUsageDay.objects
+        .filter(date__gte=period.date_from, date__lte=period.date_to)
+        .values("node_name", "inbound_tag", "via_relay")
+        .annotate(
+            connections=Sum("connections"),
+            people=Count("user_id", distinct=True),
+            mobile=Count("user_id", distinct=True, filter=Q(network=InboundUsageDay.Network.MOBILE)),
+            fixed=Count("user_id", distinct=True, filter=Q(network=InboundUsageDay.Network.FIXED)),
+        )
+        .order_by("-people", "-connections")
+    )
+    relayed = {
+        (row["node"], row["tag"]): row for row in relay_networks(period)
+    }
+    result = []
+    for row in rows:
+        key = (row["node_name"], row["inbound_tag"])
+        # У релейного туннеля людей мы знаем (их видит выходная нода), а сеть —
+        # только в адресах, и приходит она с самого релея.
+        extra = relayed.get(key, {}) if row["via_relay"] else {}
+        result.append({
+            "title": _tunnel_title(names, row["node_name"], row["inbound_tag"], row["via_relay"]),
+            "known": (row["node_name"], row["inbound_tag"], row["via_relay"]) in names,
+            "node": row["node_name"],
+            "tag": row["inbound_tag"],
+            "via_relay": row["via_relay"],
+            "people": row["people"],
+            "connections": row["connections"] or 0,
+            "mobile": extra.get("mobile", row["mobile"]),
+            "fixed": extra.get("fixed", row["fixed"]),
+            # Для релейных цифры рядом — это адреса, а не люди. Фронт подписывает.
+            "network_in_clients": bool(extra),
+        })
+    return result
+
+
+def operators(period: Period, limit: int = 25) -> list[dict]:
+    """С каких сетей к нам приходят.
+
+    Две цифры рядом, а не одна сумма: по прямым туннелям мы считаем **людей**
+    (в логе есть и адрес, и кто это), по релейным — только **адреса** (релей
+    видит адрес, но не знает, кто за ним). Складывать их нельзя: за одним
+    адресом бывает несколько человек, а один человек на мобильном за сутки
+    меняет адрес не раз. Поэтому столбцы разные и подписаны по-разному.
+    """
+    direct = {
+        row["asn"]: row
+        for row in InboundUsageDay.objects
+        .filter(date__gte=period.date_from, date__lte=period.date_to)
+        .exclude(asn=0)
+        .values("asn", "operator", "network")
+        .annotate(connections=Sum("connections"), people=Count("user_id", distinct=True))
+    }
+    relayed = {
+        row["asn"]: row
+        for row in RelayNetworkDay.objects
+        .filter(date__gte=period.date_from, date__lte=period.date_to)
+        .exclude(asn=0)
+        .values("asn", "operator", "network")
+        .annotate(connections=Sum("connections"), clients=Sum("clients"))
+    }
+
+    merged: list[dict] = []
+    for asn in set(direct) | set(relayed):
+        here, there = direct.get(asn, {}), relayed.get(asn, {})
+        merged.append({
+            "asn": asn,
+            "operator": here.get("operator") or there.get("operator") or f"AS{asn}",
+            "network": here.get("network") or there.get("network") or "unknown",
+            "people": here.get("people", 0),
+            "relay_clients": there.get("clients", 0),
+            "connections": (here.get("connections") or 0) + (there.get("connections") or 0),
+        })
+    merged.sort(key=lambda row: (-row["people"], -row["relay_clients"], -row["connections"]))
+    return merged[:limit]
+
+
+def relay_networks(period: Period) -> list[dict]:
+    """Разбивка релейных туннелей по типу сети — в адресах, не в людях."""
+    rows = (
+        RelayNetworkDay.objects
+        .filter(date__gte=period.date_from, date__lte=period.date_to)
+        .values("inbound_tag", "node_name", "network")
+        .annotate(clients=Sum("clients"), connections=Sum("connections"))
+    )
+    by_tunnel: dict[tuple, dict] = {}
+    for row in rows:
+        key = (row["node_name"], row["inbound_tag"])
+        target = by_tunnel.setdefault(key, {"mobile": 0, "fixed": 0, "unknown": 0})
+        target[row["network"]] = target.get(row["network"], 0) + (row["clients"] or 0)
+    return [{"node": node, "tag": tag, **counts} for (node, tag), counts in by_tunnel.items()]
+
+
+def networks(period: Period) -> list[dict]:
+    """Мобильные, домашние и те, у кого сеть не видна.
+
+    Третья группа — это не сбой: у релейных туннелей адрес московский, и
+    оператор человека из него не выводится. На странице так и подписано.
+    """
+    titles = {
+        InboundUsageDay.Network.MOBILE: "Мобильный интернет",
+        InboundUsageDay.Network.FIXED: "Домашний интернет",
+        InboundUsageDay.Network.UNKNOWN: "Сеть не видна (через релей)",
+    }
+    rows = (
+        InboundUsageDay.objects
+        .filter(date__gte=period.date_from, date__lte=period.date_to)
+        .values("network")
+        .annotate(connections=Sum("connections"), people=Count("user_id", distinct=True))
+    )
+    by_kind = {row["network"]: row for row in rows}
+    return [
+        {
+            "kind": kind,
+            "title": title,
+            "people": by_kind.get(kind, {}).get("people", 0),
+            "connections": by_kind.get(kind, {}).get("connections") or 0,
+        }
+        for kind, title in titles.items()
+    ]
+
+
+def tunnel_series(period: Period, metric: str = "people") -> dict:
+    """Динамика по суткам: сколько людей (или соединений) на каждом туннеле.
+
+    Ряд на туннель, а не одна линия: вопрос «какой туннель сдаёт» без разбивки
+    не читается — общая сумма может стоять на месте, пока люди перетекают с
+    одного входа на другой.
+    """
+    names = profile_names()
+    aggregate = Count("user_id", distinct=True) if metric == "people" else Sum("connections")
+    rows = (
+        InboundUsageDay.objects
+        .filter(date__gte=period.date_from, date__lte=period.date_to)
+        .values("date", "node_name", "inbound_tag", "via_relay")
+        .annotate(value=aggregate)
+    )
+
+    buckets = period.buckets()
+    index = {bucket: position for position, bucket in enumerate(buckets)}
+    lines: dict[tuple, list[int]] = {}
+    for row in rows:
+        key = (row["node_name"], row["inbound_tag"], row["via_relay"])
+        # Сутки могут не попасть в корзину, если период укрупнён до недель.
+        bucket = period._floor(row["date"])
+        position = index.get(bucket)
+        if position is None:
+            continue
+        line = lines.setdefault(key, [0] * len(buckets))
+        line[position] += row["value"] or 0
+
+    series = [
+        {"title": _tunnel_title(names, *key), "values": values, "total": sum(values)}
+        for key, values in lines.items()
+    ]
+    series.sort(key=lambda item: -item["total"])
+    return {
+        "labels": [period.label(bucket) for bucket in buckets],
+        "dates": [bucket.isoformat() for bucket in buckets],
+        "series": series[:10],
+        "metric": metric,
+    }

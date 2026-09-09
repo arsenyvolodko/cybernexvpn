@@ -37,6 +37,36 @@ def _authorized(request: Request) -> bool:
 
 
 @api_view(["POST"])
+def ingest_relay_networks(request: Request) -> Response:
+    """С каких сетей приходят на релейные туннели.
+
+    Тело:
+        {"rows": [{"port": 9494, "date": "2026-09-09", "asn": 8359,
+                   "operator": "MTS", "connections": 812, "clients": 14}]}
+
+    Человека здесь нет: релей видит адрес, но не знает, кто за ним. Порт
+    однозначно указывает на профиль подписки — соответствие держит бэкенд.
+    """
+    if not _authorized(request):
+        return Response(status=403)
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    rows = payload.get("rows")
+    if not isinstance(rows, list):
+        return Response({"detail": "нужен rows"}, status=400)
+    if len(rows) > MAX_ROWS:
+        return Response({"detail": f"слишком много строк: {len(rows)}"}, status=400)
+
+    try:
+        result = telemetry.record_relay_networks(rows)
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.warning("Кривая статистика с релея: %s", exc)
+        return Response({"detail": "не разобрал строки"}, status=400)
+
+    return Response({"stored": result.stored, "skipped": result.unknown_users})
+
+
+@api_view(["POST"])
 def ingest_inbound_usage(request: Request) -> Response:
     """Счётчики соединений по инбаундам за сутки.
 

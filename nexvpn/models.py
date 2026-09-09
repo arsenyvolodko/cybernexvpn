@@ -593,6 +593,55 @@ class InboundUsageDay(models.Model):
         return f"{self.date} {self.inbound_tag}@{self.node_name}: {self.connections}"
 
 
+class RelayNetworkDay(models.Model):
+    """С каких сетей приходят на туннели, идущие через московский релей.
+
+    Отдельно от `InboundUsageDay`, потому что здесь **нет человека** — и это не
+    упущение, а следствие устройства релея. Он подменяет адрес отправителя
+    (masquerade для DNAT, собственное соединение у nginx), поэтому выходная
+    нода видит адрес Москвы и сеть человека там потеряна. Сам релей адрес
+    видит, но не знает, кто это: `email` едет внутри протокола, который релей
+    не разбирает.
+
+    Связать половинки по логам нельзя — masquerade меняет и порт. Полная
+    связка потребовала бы PROXY protocol, а это согласованная правка на
+    нагруженном релее, которая для Hysteria2 поверх UDP не работает вовсе.
+    Для вопроса «каким туннелем пользуются на каком операторе» персональная
+    привязка и не нужна, поэтому храним агрегат.
+
+    `clients` — сколько разных адресов, а не людей. За одним адресом может
+    сидеть несколько человек (общий NAT оператора), а один человек на мобильном
+    за сутки меняет адрес не раз. Это оценка сверху и снизу одновременно, и на
+    странице подписана именно как адреса.
+    """
+
+    date = models.DateField()
+    node_name = models.CharField(max_length=63)
+    inbound_tag = models.CharField(max_length=63)
+    asn = models.PositiveIntegerField(default=0)
+    operator = models.CharField(max_length=63, blank=True, default="")
+    network = models.CharField(
+        max_length=15, choices=InboundUsageDay.Network.choices,
+        default=InboundUsageDay.Network.UNKNOWN,
+    )
+    connections = models.PositiveIntegerField(default=0)
+    clients = models.PositiveIntegerField(default=0, help_text="Разных адресов за сутки")
+
+    class Meta:
+        verbose_name = "релей: сети по дням"
+        verbose_name_plural = "Релей: сети по дням"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["date", "node_name", "inbound_tag", "asn"],
+                name="unique_relay_network_day",
+            )
+        ]
+        indexes = [models.Index(fields=["date", "inbound_tag"])]
+
+    def __str__(self):
+        return f"{self.date} {self.inbound_tag}: {self.operator or self.asn}"
+
+
 class UsageDashboard(NodeUsageDay):
     """Только ради страницы в админке — своей таблицы не заводит."""
 

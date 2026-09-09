@@ -77,6 +77,16 @@
   .empty { color: var(--muted); padding: 18px 4px; }
   .scroll { overflow-x: auto; }
 
+  .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 10px; font-size: 12.5px; }
+  .legend span { display: flex; align-items: center; gap: 5px; color: var(--muted); }
+  .legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+  .bar-cell { display: flex; align-items: center; gap: 8px; }
+  .bar-cell .track { flex: 1; height: 6px; background: #eef1f6; border-radius: 3px; overflow: hidden; min-width: 60px; }
+  .bar-cell .fill { height: 100%; background: var(--accent); }
+  .muted { color: var(--muted); }
+
   dialog { border: none; border-radius: 14px; padding: 0; max-width: 720px; width: 92vw;
            box-shadow: 0 20px 60px rgba(16,32,60,.28); }
   dialog::backdrop { background: rgba(16,32,60,.35); }
@@ -135,6 +145,40 @@
       </select>
     </div>
     <div class="scroll"><table id="payTable"></table></div>
+  </div>
+
+  <div class="panel">
+    <div class="head">
+      <div>
+        <h2>Туннели</h2>
+        <div class="sub">Считается по access log нод: соединение попадает сюда, только если оно
+          реально установилось. Пустой туннель — это «не выбрали ИЛИ не работает», по логу не различить.</div>
+      </div>
+      <span class="spacer"></span>
+      <select id="tunnelMetric">
+        <option value="people">Показывать: людей</option>
+        <option value="connections">Показывать: соединения</option>
+      </select>
+    </div>
+    <svg class="chart" id="tunnelChart"></svg>
+    <div class="legend" id="tunnelLegend"></div>
+    <div class="scroll" style="margin-top:14px"><table id="tunnelTable"></table></div>
+  </div>
+
+  <div class="cols">
+    <div class="panel">
+      <h2>Как подключаются</h2>
+      <div class="sub">Мобильный или домашний — вывод по сети оператора, а не признак от клиента.
+        У Tele2 и МегаФона почти достоверно, у МТС и Билайна хуже: они раздают и то и другое.</div>
+      <div class="scroll"><table id="networkTable"></table></div>
+    </div>
+    <div class="panel">
+      <h2>Операторы</h2>
+      <div class="sub">Две цифры рядом, а не одна сумма: по прямым туннелям считаются люди,
+        по релейным — адреса. Релей видит адрес, но не знает, кто за ним, а за одним адресом
+        бывает несколько человек. Складывать их было бы враньём.</div>
+      <div class="scroll"><table id="operatorTable"></table></div>
+    </div>
   </div>
 
   <div class="panel">
@@ -319,7 +363,11 @@ function showTip(i, px, py) {
   tip.style.left = Math.min(Math.max(px - 40, 0), box.width - 120) + "px";
   tip.style.top = Math.max(py - 56, 0) + "px";
 }
-window.addEventListener("resize", () => { if (chartData) drawChart(chartData); });
+window.addEventListener("resize", () => {
+  if (chartData) drawChart(chartData);
+  if (tunnelData) drawMultiChart(tunnelData);
+});
+let tunnelData = null;
 
 // ─── таблицы ───
 function drawTable(el, columns, rows, onRow) {
@@ -384,6 +432,103 @@ async function loadUsers() {
   ], data.rows, (row) => openUser(row.id));
 }
 
+// ─── туннели ───
+const PALETTE = ["#12b886", "#4c6ef5", "#f59f00", "#e64980", "#15aabf",
+                "#7950f2", "#fa5252", "#82c91e", "#fd7e14", "#868e96"];
+
+$("tunnelMetric").onchange = (e) => { state.tunnelMetric = e.target.value; loadTunnels(); };
+state.tunnelMetric = "people";
+
+function drawMultiChart(data) {
+  const svg = $("tunnelChart");
+  const W = svg.clientWidth || 900, H = 300;
+  const padL = 58, padR = 14, padT = 14, padB = 30;
+  const w = W - padL - padR, h = H - padT - padB;
+  const n = data.labels.length;
+  if (!n || !data.series.length) {
+    svg.innerHTML = "";
+    $("tunnelLegend").innerHTML = '<span class="muted">За этот период данных нет</span>';
+    return;
+  }
+  const peak = Math.max(...data.series.flatMap((s) => s.values), 0);
+  const ticks = niceTicks(peak);
+  const maxY = ticks[ticks.length - 1] || 1;
+  const x = (i) => n === 1 ? padL + w / 2 : padL + (w * i) / (n - 1);
+  const y = (v) => padT + h - (h * v) / maxY;
+
+  let out = "";
+  ticks.forEach((t) => {
+    out += '<line class="grid" x1="' + padL + '" y1="' + y(t) + '" x2="' + (W - padR) + '" y2="' + y(t) + '"/>';
+    out += '<text class="axis" x="' + (padL - 8) + '" y="' + (y(t) + 4) + '" text-anchor="end">' + fmtInt(t) + "</text>";
+  });
+  data.series.forEach((line, index) => {
+    const color = PALETTE[index % PALETTE.length];
+    const path = line.values.map((v, i) => (i ? "L" : "M") + x(i) + " " + y(v)).join(" ");
+    out += '<path d="' + path + '" fill="none" stroke="' + color + '" stroke-width="2" stroke-linejoin="round"/>';
+    if (n <= 60) line.values.forEach((v, i) => {
+      out += '<circle cx="' + x(i) + '" cy="' + y(v) + '" r="2.5" fill="#fff" stroke="' + color + '" stroke-width="2"/>';
+    });
+  });
+  const every = Math.max(1, Math.ceil(n / 12));
+  data.labels.forEach((label, i) => {
+    if (i % every === 0 || i === n - 1) {
+      out += '<text class="axis" x="' + x(i) + '" y="' + (H - 8) + '" text-anchor="middle">' + label + "</text>";
+    }
+  });
+  svg.innerHTML = out;
+
+  $("tunnelLegend").innerHTML = data.series.map((line, index) =>
+    '<span><i style="background:' + PALETTE[index % PALETTE.length] + '"></i>' + line.title + "</span>").join("");
+}
+
+function bar(value, peak) {
+  const width = peak ? Math.round(100 * value / peak) : 0;
+  return '<div class="bar-cell"><div class="track"><div class="fill" style="width:' + width +
+         '%"></div></div><span>' + fmtInt(value) + "</span></div>";
+}
+
+async function loadTunnels() {
+  const data = await api("/dash/api/tunnels/", { tunnel_metric: state.tunnelMetric });
+  if (!data) return;
+
+  tunnelData = data.series;
+  drawMultiChart(data.series);
+
+  const peakPeople = Math.max(...data.tunnels.map((t) => t.people), 1);
+  drawTable($("tunnelTable"), [
+    { title: "Туннель", cell: (r) => r.title + (r.known ? "" :
+        ' <span class="tag no">нет в подписке</span>') },
+    { title: "Куда", cell: (r) => r.node + (r.via_relay ? " · через релей" : "") },
+    { title: "Людей", cell: (r) => bar(r.people, peakPeople) },
+    { title: "Соединений", num: true, cell: (r) => fmtInt(r.connections) },
+    { title: "Моб. / дом.", cell: (r) => {
+        const value = fmtInt(r.mobile) + " / " + fmtInt(r.fixed);
+        if (!r.via_relay) return value + ' <span class="muted">чел.</span>';
+        // У релейных сеть приходит с самого релея и считается в адресах:
+        // человека он не знает, а один адрес — не один человек.
+        if (r.network_in_clients) return value + ' <span class="muted">адр.</span>';
+        return '<span class="muted">не видно</span>';
+      } },
+  ], data.tunnels);
+
+  const totalPeople = data.networks.reduce((sum, r) => sum + r.people, 0) || 1;
+  drawTable($("networkTable"), [
+    { title: "Как подключаются", cell: (r) => r.title },
+    { title: "Людей", cell: (r) => bar(r.people, totalPeople) },
+    { title: "Доля", num: true, cell: (r) => Math.round(100 * r.people / totalPeople) + " %" },
+  ], data.networks);
+
+  const peakOperator = Math.max(...data.operators.map((r) => r.people), 1);
+  const kinds = { mobile: "моб.", fixed: "дом.", unknown: "—" };
+  const peakRelay = Math.max(...data.operators.map((r) => r.relay_clients || 0), 1);
+  drawTable($("operatorTable"), [
+    { title: "Оператор", cell: (r) => r.operator },
+    { title: "", cell: (r) => '<span class="tag">' + (kinds[r.network] || "—") + "</span>" },
+    { title: "Людей, прямые", cell: (r) => r.people ? bar(r.people, peakOperator) : "—" },
+    { title: "Адресов, релей", cell: (r) => r.relay_clients ? bar(r.relay_clients, peakRelay) : "—" },
+  ], data.operators);
+}
+
 // ─── карточка ───
 async function openUser(id) {
   const res = await fetch("/dash/api/users/" + id + "/", { credentials: "same-origin" });
@@ -437,6 +582,7 @@ async function reload() {
   drawCards(data.cards);
   drawChart(data.series);
   loadPayments();
+  loadTunnels();
   loadUsers();
 }
 drawSegments();

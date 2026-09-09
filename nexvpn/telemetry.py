@@ -30,7 +30,14 @@ from django.utils.dateparse import parse_datetime
 from django.utils.timezone import localdate, now
 
 from nexvpn.enums import PanelSyncStatusEnum
-from nexvpn.models import InboundUsageDay, NexUser, NodeUsageDay, PanelPresence, Subscription
+from nexvpn.models import (
+    InboundUsageDay,
+    NexUser,
+    NodeUsageDay,
+    PanelPresence,
+    RelayNetworkDay,
+    Subscription,
+)
 from nexvpn.remnawave.client import RemnawaveClient
 
 logger = logging.getLogger(__name__)
@@ -265,6 +272,54 @@ def record_inbound_usage(node_name: str, rows: list[dict]) -> IngestResult:
 
     logger.info("Туннели с ноды %s: записано %s, вне нашей базы: %s", node_name, stored, unknown)
     return IngestResult(stored=stored, unknown_users=unknown)
+
+
+# Порт на релее однозначно говорит, какой это профиль подписки: релей ничего
+# не разбирает, он просто пробрасывает порт на выходную ноду. Таблица живёт
+# здесь, а не на релее, чтобы правка проброса не требовала похода на сервер.
+RELAY_PORTS: dict[int, tuple[str, str]] = {
+    443: ("eu1-ovh", "VLESS-GRPC"),
+    8443: ("eu1-ovh", "VLESS-REALITY-VK"),
+    9494: ("eu1-ovh", "Hysteria2-Obfs"),
+}
+
+
+def record_relay_networks(rows: list[dict]) -> IngestResult:
+    """Принять с релея сводку «порт, сеть, сколько адресов и соединений».
+
+    Человека здесь нет и быть не может — см. `RelayNetworkDay`. Строки с
+    незнакомым портом пропускаем: значит, на релее появился проброс, про
+    который бэкенд не знает, и молча приписывать его к чужому туннелю нельзя.
+    """
+    from nexvpn import networks
+
+    stored = skipped = 0
+    for row in rows:
+        target = RELAY_PORTS.get(int(row.get("port") or 0))
+        if target is None:
+            skipped += 1
+            continue
+        node_name, inbound_tag = target
+        operator = (row.get("operator") or "")[:63]
+        asn = int(row.get("asn") or 0)
+        RelayNetworkDay.objects.update_or_create(
+            date=row["date"],
+            node_name=node_name,
+            inbound_tag=inbound_tag,
+            asn=asn,
+            defaults={
+                "operator": operator,
+                "network": networks.classify(asn, operator),
+                "connections": row.get("connections") or 0,
+                "clients": row.get("clients") or 0,
+            },
+        )
+        stored += 1
+
+    if skipped:
+        logger.warning("С релея пришли %s строк с неизвестным портом", skipped)
+    logger.info("Сети с релея: записано %s, пропущено %s", stored, skipped)
+    return IngestResult(stored=stored, unknown_users=skipped)
 
 
 def usage_by_tunnel(days: int = 7) -> list[dict]:
