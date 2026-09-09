@@ -246,7 +246,18 @@ def change_plan_now(
     expires_before = subscription.expires_at
     subscription.plan = new_plan
     subscription.next_plan = None
-    subscription.expires_at = normalize_expiry(now() + timedelta(days=converted_days))
+    if converted_days > 0:
+        subscription.expires_at = normalize_expiry(now() + timedelta(days=converted_days))
+    else:
+        # Ноль дней после пересчёта — доступа нет, и срок не должен уехать
+        # вперёд. `normalize_expiry` округляет вверх до 20:00, поэтому
+        # `normalize_expiry(now())` всегда попадает в будущее: у истёкшей
+        # подписки это дарило до суток и **оживляло** её, а меняя тариф
+        # туда-обратно каждый вечер, можно было продлевать доступ бесконечно.
+        #
+        # Уже истёкшая остаётся истёкшей, а живая, чей остаток обнулился при
+        # пересчёте, кончается сейчас — ровно то, что означает «ноль дней».
+        subscription.expires_at = min(now(), expires_before)
     subscription.panel_status = PanelSyncStatusEnum.PENDING
     subscription.save()
     SentReminder.objects.filter(subscription=subscription).delete()

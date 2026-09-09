@@ -221,3 +221,98 @@ def test_plan_prices_are_editable_without_touching_history(plans):
     event = SubscriptionEvent.objects.filter(reason=SubscriptionEventReasonEnum.PURCHASE).get()
     assert event.price_month == 400
     assert event.amount == 400
+
+
+# --- смена тарифа не должна дарить время ---
+
+
+def test_plan_change_does_not_revive_an_expired_subscription(db):
+    """`normalize_expiry` округляет вверх, поэтому ноль дней превращался в сутки.
+
+    Меняя тариф туда-обратно каждый вечер после 20:00, можно было пользоваться
+    сервисом бесплатно неограниченно долго.
+    """
+    import datetime as dt
+
+    from django.utils.timezone import now
+
+    from nexvpn.api.tests.factories import PlanFactory, SubscriptionFactory
+    from nexvpn.models import Subscription
+    from nexvpn.subscription import service
+
+    small = PlanFactory(device_limit=1, price_month=150)
+    big = PlanFactory(device_limit=3, price_month=400)
+    expired_at = now() - dt.timedelta(hours=3)
+    subscription = SubscriptionFactory(plan=big, expires_at=expired_at)
+
+    service.change_plan_now(subscription.user, small)
+
+    stored = Subscription.objects.get(pk=subscription.pk)
+    assert stored.plan_id == small.pk, "тариф смениться должен"
+    assert stored.expires_at == expired_at, "а срок — остаться на месте"
+    assert not stored.is_active
+
+
+def test_repeated_plan_changes_grant_nothing(db):
+    """Тот же сценарий, но подряд: каждое переключение обязано быть бесплатным
+    для нас, а не только первое."""
+    import datetime as dt
+
+    from django.utils.timezone import now
+
+    from nexvpn.api.tests.factories import PlanFactory, SubscriptionFactory
+    from nexvpn.models import Subscription
+    from nexvpn.subscription import service
+
+    small = PlanFactory(device_limit=1, price_month=150)
+    big = PlanFactory(device_limit=3, price_month=400)
+    expired_at = now() - dt.timedelta(hours=3)
+    subscription = SubscriptionFactory(plan=big, expires_at=expired_at)
+
+    for target in (small, big, small):
+        service.change_plan_now(subscription.user, target)
+
+    assert Subscription.objects.get(pk=subscription.pk).expires_at == expired_at
+
+
+def test_zero_conversion_ends_an_active_subscription_now(db):
+    """Остаток обнулился при пересчёте — значит доступ кончается сейчас,
+    а не в ближайшие 20:00."""
+    import datetime as dt
+
+    from django.utils.timezone import now
+
+    from nexvpn.api.tests.factories import PlanFactory, SubscriptionFactory
+    from nexvpn.models import Subscription
+    from nexvpn.subscription import service
+
+    cheap = PlanFactory(device_limit=1, price_month=100)
+    pricey = PlanFactory(device_limit=10, price_month=5000)
+    subscription = SubscriptionFactory(plan=cheap, expires_at=now() + dt.timedelta(hours=20))
+
+    service.change_plan_now(subscription.user, pricey)
+
+    stored = Subscription.objects.get(pk=subscription.pk)
+    assert stored.expires_at <= now(), "нисколько дней — значит нисколько"
+
+
+def test_normal_conversion_still_rounds_up(db):
+    """Обычный случай не задет: несколько часов сверху человек по-прежнему получает."""
+    import datetime as dt
+
+    from django.conf import settings
+    from django.utils.timezone import localtime, now
+
+    from nexvpn.api.tests.factories import PlanFactory, SubscriptionFactory
+    from nexvpn.models import Subscription
+    from nexvpn.subscription import service
+
+    cheap = PlanFactory(device_limit=1, price_month=100)
+    other = PlanFactory(device_limit=3, price_month=200)
+    subscription = SubscriptionFactory(plan=cheap, expires_at=now() + dt.timedelta(days=30))
+
+    service.change_plan_now(subscription.user, other)
+
+    stored = Subscription.objects.get(pk=subscription.pk)
+    assert stored.is_active
+    assert localtime(stored.expires_at).hour == settings.SUBSCRIPTION_EXPIRY_HOUR
