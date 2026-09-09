@@ -21,6 +21,7 @@ from bot import texts
 from bot.keyboards import keyboards
 from nexvpn.enums import SubscriptionEventReasonEnum
 from nexvpn.models import SentReminder, Subscription, SubscriptionEvent
+from nexvpn.subscription import panel_sync
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +210,35 @@ def remaining(subscription: Subscription) -> str:
     return texts.plural_hours(max(1, round(minutes_left / 60)))
 
 
+# До какого смещения предупреждать про лишние устройства. Дальше суток это
+# шум: до перехода ещё далеко, человек успеет забыть. За сутки и ближе — это
+# последний момент, когда он может выбрать сам, а не узнать постфактум.
+TRIM_NOTICE_MAX_HOURS = 24
+
+
+def trim_notice(subscription: Subscription) -> str:
+    """Приписка про лишние устройства, если на носу переход на меньший тариф.
+
+    Пустая строка, если перехода нет, устройств не больше лимита или панель
+    не ответила: пугать человека догадкой нельзя.
+    """
+    if subscription.next_plan_id is None:
+        return ""
+    try:
+        used = len(panel_sync.list_devices(subscription))
+    except Exception:
+        logger.warning("Панель не отдала устройства для напоминания %s", subscription.pk)
+        return ""
+    limit = subscription.next_plan.device_limit
+    if used <= limit:
+        return ""
+    return texts.REMINDER_TRIM_NOTICE.format(
+        plan=texts.plural_devices(limit),
+        used=texts.plural_devices(used),
+        limit=texts.plural_devices(limit),
+    )
+
+
 def build_text(subscription: Subscription) -> str:
     """Текст напоминания.
 
@@ -224,6 +254,14 @@ def build_text(subscription: Subscription) -> str:
         left=remaining(subscription),
         plan=texts.plural_devices(subscription.plan.device_limit),
     )
+
+
+def _reminder_extras(subscription: Subscription, hours_before: int) -> tuple[str, bool]:
+    """Приписка и нужна ли кнопка «Мои устройства». Только за сутки и ближе."""
+    if hours_before > TRIM_NOTICE_MAX_HOURS:
+        return "", False
+    notice = trim_notice(subscription)
+    return notice, bool(notice)
 
 
 async def send_due_reminders(bot) -> tuple[int, int]:
@@ -243,6 +281,8 @@ async def send_due_reminders(bot) -> tuple[int, int]:
         # навсегда закроет это смещение для человека.
         try:
             text = build_text(subscription)
+            notice, with_devices = _reminder_extras(subscription, hours_before)
+            text += notice
         except Exception:
             # Один человек не должен уносить с собой всю пачку: дальше по списку
             # стоят те, кому напоминание ещё можно доставить вовремя.
@@ -261,7 +301,7 @@ async def send_due_reminders(bot) -> tuple[int, int]:
         except IntegrityError:
             continue
 
-        if await _send(bot, subscription.user_id, text, keyboards.reminder()):
+        if await _send(bot, subscription.user_id, text, keyboards.reminder(with_devices=with_devices)):
             sent += 1
         else:
             failed += 1

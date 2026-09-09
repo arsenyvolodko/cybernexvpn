@@ -319,10 +319,19 @@ def faq(topics) -> InlineKeyboardMarkup:
     return _rows(*items, back_to=MENU)
 
 
-def reminder() -> InlineKeyboardMarkup:
+def reminder(*, with_devices: bool = False) -> InlineKeyboardMarkup:
     """Напоминание приходит отдельным сообщением, поэтому «Назад» тут нет —
-    возвращаться некуда, есть только действие."""
-    return _rows(ButtonsStorage.RENEW, ButtonsStorage.MY_SUBSCRIPTION)
+    возвращаться некуда, есть только действие.
+
+    `with_devices` — когда на носу переход на меньший тариф и устройств больше,
+    чем он позволяет: человеку нужен прямой путь туда, где он может выбрать
+    сам, а не узнать постфактум, что лишние отключились.
+    """
+    items = [ButtonsStorage.RENEW]
+    if with_devices:
+        items.append(ButtonsStorage.MY_DEVICES)
+    items.append(ButtonsStorage.MY_SUBSCRIPTION)
+    return _rows(*items)
 
 
 def _renew_buttons(options) -> list[InlineKeyboardButton]:

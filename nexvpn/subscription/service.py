@@ -343,7 +343,14 @@ def cancel_scheduled_downgrade(user: NexUser) -> Subscription:
 
 @transaction.atomic
 def apply_scheduled_downgrade(subscription: Subscription) -> Subscription:
-    """Применить отложенное понижение тарифа. Вызывается по истечении периода."""
+    """Применить отложенное понижение тарифа. Вызывается по истечении периода.
+
+    Лишние устройства сносятся здесь же, автоматически: панель их сама не
+    выбрасывает, а спросить человека в этот момент нельзя — переход случается
+    сам по себе, без его участия. Уходят те, которыми дольше всего не
+    пользовались; предупреждение об этом человек видел, когда выбирал тариф,
+    и в напоминаниях за последние сутки.
+    """
     if subscription.next_plan_id is None:
         return subscription
 
@@ -352,6 +359,17 @@ def apply_scheduled_downgrade(subscription: Subscription) -> Subscription:
     subscription.next_plan = None
     subscription.panel_status = PanelSyncStatusEnum.PENDING
     subscription.save(update_fields=["plan", "next_plan", "panel_status", "updated_at"])
+
+    removed = []
+    try:
+        from nexvpn.subscription import panel_sync
+
+        removed = panel_sync.trim_devices_to_limit(subscription)
+    except Exception:
+        # Панель молчит — тариф всё равно сменился, а устройства подчистит
+        # следующий вызов. Ронять переход из-за этого нельзя.
+        logger.warning("Не удалось подчистить устройства после понижения %s",
+                       subscription.pk, exc_info=True)
 
     SubscriptionEvent.objects.create(
         user=subscription.user,
@@ -362,7 +380,10 @@ def apply_scheduled_downgrade(subscription: Subscription) -> Subscription:
         price_month=subscription.plan.price_month,
         expires_at_before=subscription.expires_at,
         expires_at_after=subscription.expires_at,
-        comment=f"{old_plan.device_limit} → {subscription.plan.device_limit} устр.",
+        comment=(
+            f"{old_plan.device_limit} → {subscription.plan.device_limit} устр."
+            + (f", удалено лишних: {len(removed)}" if removed else "")
+        ),
     )
     return subscription
 

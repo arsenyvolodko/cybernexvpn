@@ -82,6 +82,12 @@ def panel(monkeypatch):
 
     monkeypatch.setattr("nexvpn.subscription.panel_sync.list_devices", list_devices)
     monkeypatch.setattr("nexvpn.subscription.panel_sync.remove_device", remove_device)
+    # trim_devices_to_limit ходит в клиент панели напрямую, минуя remove_device.
+    monkeypatch.setattr(
+        "nexvpn.remnawave.client.RemnawaveClient.delete_device",
+        lambda self, user_id, hwid: state["deleted"].append(hwid),
+    )
+    monkeypatch.setattr("nexvpn.remnawave.client.RemnawaveClient.__init__", lambda self, *a, **kw: None)
     monkeypatch.setattr("bot.services._sync_quietly", lambda subscription: None)
     return state
 
@@ -215,3 +221,119 @@ def test_silent_panel_does_not_change_the_plan(monkeypatch, expired_subscription
     assert shown is True, "молча менять тариф вслепую нельзя"
     assert texts.TRIM_PANEL_SILENT in call.message.text
     assert Subscription.objects.get(pk=expired_subscription.pk).plan_id != small.pk
+
+
+# --- живая подписка: предупреждаем, но устройства не трогаем ---
+
+
+@pytest.fixture
+def active_subscription(small):
+    big = PlanFactory(device_limit=3, price_month=400)
+    return SubscriptionFactory(plan=big, expires_at=now() + dt.timedelta(days=10))
+
+
+def test_active_downgrade_does_not_open_the_picker(panel, active_subscription, small):
+    """Устройства до конца оплаченного периода принадлежат человеку."""
+    assert async_to_sync(services.plan_change_is_immediate)(
+        active_subscription.user, small.device_limit
+    ) is False
+
+
+def test_expired_change_is_immediate(panel, expired_subscription, small):
+    assert async_to_sync(services.plan_change_is_immediate)(
+        expired_subscription.user, small.device_limit
+    ) is True
+
+
+def test_scheduled_downgrade_trims_when_it_applies(panel, active_subscription, small):
+    """Спросить человека в этот момент нельзя — переход случается сам."""
+    from nexvpn.subscription import service
+
+    service.schedule_plan_downgrade(active_subscription.user, small)
+    Subscription.objects.filter(pk=active_subscription.pk).update(
+        expires_at=now() - dt.timedelta(hours=1)
+    )
+    stored = Subscription.objects.get(pk=active_subscription.pk)
+
+    service.apply_scheduled_downgrade(stored)
+
+    assert sorted(panel["deleted"]) == ["B", "C"], "остаётся самое свежее"
+    assert Subscription.objects.get(pk=active_subscription.pk).plan_id == small.pk
+
+
+def test_silent_panel_does_not_block_the_transition(monkeypatch, active_subscription, small):
+    """Тариф всё равно должен смениться: устройства подчистит следующий проход."""
+    from nexvpn.remnawave import RemnawaveError
+    from nexvpn.subscription import service
+
+    monkeypatch.setattr("nexvpn.subscription.panel_sync.list_devices",
+                        lambda *a, **kw: (_ for _ in ()).throw(RemnawaveError("нет связи")))
+    service.schedule_plan_downgrade(active_subscription.user, small)
+    Subscription.objects.filter(pk=active_subscription.pk).update(
+        expires_at=now() - dt.timedelta(hours=1)
+    )
+
+    service.apply_scheduled_downgrade(Subscription.objects.get(pk=active_subscription.pk))
+
+    assert Subscription.objects.get(pk=active_subscription.pk).plan_id == small.pk
+
+
+# --- напоминание за сутки и ближе ---
+
+
+def test_reminder_warns_about_the_transition(panel, active_subscription, small):
+    from bot.notifications import _reminder_extras
+    from nexvpn.subscription import service
+
+    service.schedule_plan_downgrade(active_subscription.user, small)
+    stored = Subscription.objects.select_related("next_plan").get(pk=active_subscription.pk)
+
+    notice, with_devices = _reminder_extras(stored, 24)
+
+    assert "❗️" in notice and "переход" in notice
+    assert with_devices is True, "нужна кнопка «Мои устройства»"
+
+
+def test_far_reminders_stay_quiet(panel, active_subscription, small):
+    """За неделю до перехода это шум: человек успеет забыть."""
+    from bot.notifications import _reminder_extras
+    from nexvpn.subscription import service
+
+    service.schedule_plan_downgrade(active_subscription.user, small)
+    stored = Subscription.objects.select_related("next_plan").get(pk=active_subscription.pk)
+
+    assert _reminder_extras(stored, 168) == ("", False)
+
+
+def test_no_warning_when_devices_already_fit(panel, small):
+    """Понижение есть, но три устройства в новый лимит помещаются."""
+    from bot.notifications import _reminder_extras
+    from nexvpn.subscription import service
+
+    biggest = PlanFactory(device_limit=10, price_month=1000)
+    roomy = PlanFactory(device_limit=5, price_month=600)
+    subscription = SubscriptionFactory(plan=biggest, expires_at=now() + dt.timedelta(days=10))
+
+    service.schedule_plan_downgrade(subscription.user, roomy)
+    stored = Subscription.objects.select_related("next_plan").get(pk=subscription.pk)
+
+    assert _reminder_extras(stored, 24) == ("", False)
+
+
+def test_no_warning_without_a_scheduled_change(panel, active_subscription):
+    from bot.notifications import _reminder_extras
+
+    assert _reminder_extras(active_subscription, 1) == ("", False)
+
+
+def test_silent_panel_does_not_invent_a_warning(monkeypatch, active_subscription, small):
+    """Пугать человека догадкой нельзя."""
+    from bot.notifications import _reminder_extras
+    from nexvpn.subscription import service
+
+    service.schedule_plan_downgrade(active_subscription.user, small)
+    monkeypatch.setattr("bot.notifications.panel_sync.list_devices",
+                        lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("нет связи")))
+    stored = Subscription.objects.select_related("next_plan").get(pk=active_subscription.pk)
+
+    assert _reminder_extras(stored, 24) == ("", False)

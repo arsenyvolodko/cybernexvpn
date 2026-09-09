@@ -21,8 +21,10 @@ from bot.keyboards import ButtonsStorage, keyboards
 from bot.keyboards.factories import PlanCallback, RenewCallback
 from bot.services import (
     change_plan_free,
+    device_count,
     get_plan_options,
     get_renew_options,
+    plan_change_is_immediate,
     receipt_needs_email,
     remember_payment_screen,
     set_email,
@@ -157,12 +159,14 @@ async def handle_plan_details(call: CallbackQuery, callback_data: PlanCallback, 
 async def handle_plan_free(call: CallbackQuery, callback_data: PlanCallback, user: NexUser) -> None:
     from bot.handlers.trim import show_warning
 
-    # Тот же разговор про лишние устройства, что и в коротком сценарии:
-    # переход на меньший тариф не должен оставлять человека с устройствами,
-    # которые он не может ни использовать, ни заменить.
     await call.answer()
-    if await show_warning(call, user, callback_data.device_limit):
-        return
+    # Интерактивный разбор устройств нужен только там, где тариф меняется
+    # немедленно. У живой подписки переход откладывается до конца оплаченного
+    # периода, устройства до тех пор оплачены — забирать их сейчас нечестно.
+    # Такому человеку мы просто говорим, что случится в день перехода.
+    if await plan_change_is_immediate(user, callback_data.device_limit):
+        if await show_warning(call, user, callback_data.device_limit):
+            return
 
     try:
         subscription = await change_plan_free(user, callback_data.device_limit)
@@ -175,6 +179,14 @@ async def handle_plan_free(call: CallbackQuery, callback_data: PlanCallback, use
             plan=texts.plural_devices(subscription.next_plan.device_limit),
             date=subscription.expires_at.strftime("%d.%m.%Y"),
         )
+        # Только если устройств действительно больше: пугать того, у кого их
+        # и так меньше лимита, незачем.
+        used = await device_count(user)
+        if used is not None and used > subscription.next_plan.device_limit:
+            text += texts.PLAN_DOWNGRADE_TRIM_NOTICE.format(
+                used=texts.plural_devices(used),
+                limit=texts.plural_devices(subscription.next_plan.device_limit),
+            )
     else:
         text = texts.PLAN_CHANGED.format(
             plan=texts.plural_devices(subscription.plan.device_limit),

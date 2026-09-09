@@ -586,6 +586,33 @@ def auto_trim_hwids(user: NexUser) -> list[str]:
 
 
 @sync_to_async
+def plan_change_is_immediate(user: NexUser, device_limit: int) -> bool:
+    """Сменится ли тариф прямо сейчас, а не с начала следующего периода.
+
+    Немедленно — это повышение и любой переход у истёкшей подписки. Понижение
+    у живой откладывается: устройства до конца периода оплачены.
+    """
+    plan = Plan.objects.get(device_limit=device_limit, is_active=True)
+    subscription = Subscription.objects.select_related("plan").filter(user=user).first()
+    if subscription is None:
+        return False
+    return not (plan.price_month < subscription.plan.price_month and subscription.is_active)
+
+
+@sync_to_async
+def device_count(user: NexUser) -> int | None:
+    """Сколько устройств сейчас. None — панель не ответила."""
+    subscription = Subscription.objects.filter(user=user).first()
+    if subscription is None:
+        return 0
+    try:
+        return len(panel_sync.list_devices(subscription))
+    except RemnawaveError as exc:
+        logger.warning("Панель не отдала устройства для %s: %s", user.pk, exc)
+        return None
+
+
+@sync_to_async
 def change_plan_free(user: NexUser, device_limit: int) -> Subscription:
     """Бесплатный переход: повышение с пересчётом остатка или отложенное понижение.
 
