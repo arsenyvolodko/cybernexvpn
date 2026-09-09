@@ -621,3 +621,68 @@ def tunnel_series(period: Period, metric: str = "people") -> dict:
         "series": series[:10],
         "metric": metric,
     }
+
+
+def operator_tunnel_matrix(period: Period, limit: int = 12) -> dict:
+    """Кто каким туннелем пользуется в разрезе «оператор × туннель».
+
+    Ради этого всё и затевалось: две отдельные таблицы — «людей на туннеле» и
+    «людей у оператора» — по отдельности не отвечают на вопрос «что не работает
+    на Tele2». Отвечает только пересечение.
+
+    Считаются **люди**, поэтому строка не суммируется в итог оператора: один
+    человек за сутки ходит через несколько туннелей и попадёт в несколько
+    ячеек. Пустая ячейка означает «никто с этой сети сюда не заходил» — а вот
+    почему, из лога не видно: не выбрали или не работает.
+
+    Релейные туннели сюда не попадают: у них адрес московский, оператор
+    человека не определяется. Появятся, когда доедет статистика с релея.
+    """
+    names = profile_names()
+    rows = (
+        InboundUsageDay.objects
+        .filter(date__gte=period.date_from, date__lte=period.date_to)
+        .exclude(asn=0)
+        .values("asn", "operator", "network", "node_name", "inbound_tag", "via_relay")
+        .annotate(people=Count("user_id", distinct=True), connections=Sum("connections"))
+    )
+
+    tunnels_seen: dict[tuple, int] = {}
+    operators_seen: dict[int, dict] = {}
+    cells: dict[tuple, dict] = {}
+    for row in rows:
+        tunnel = (row["node_name"], row["inbound_tag"], row["via_relay"])
+        tunnels_seen[tunnel] = tunnels_seen.get(tunnel, 0) + row["people"]
+        operator = operators_seen.setdefault(row["asn"], {
+            "asn": row["asn"],
+            "operator": row["operator"] or f"AS{row['asn']}",
+            "network": row["network"],
+            "people": 0,
+        })
+        operator["people"] += row["people"]
+        cells[(row["asn"], tunnel)] = {
+            "people": row["people"],
+            "connections": row["connections"] or 0,
+        }
+
+    # Порядок: и туннели, и операторы — по числу людей, чтобы главное было
+    # в левом верхнем углу, а хвост не мешал читать.
+    tunnel_order = sorted(tunnels_seen, key=lambda key: -tunnels_seen[key])
+    operator_order = sorted(operators_seen.values(), key=lambda row: -row["people"])[:limit]
+
+    return {
+        "tunnels": [
+            {"title": _tunnel_title(names, *tunnel), "key": "|".join(map(str, tunnel))}
+            for tunnel in tunnel_order
+        ],
+        "rows": [
+            {
+                **operator,
+                "cells": [
+                    cells.get((operator["asn"], tunnel), {}).get("people", 0)
+                    for tunnel in tunnel_order
+                ],
+            }
+            for operator in operator_order
+        ],
+    }

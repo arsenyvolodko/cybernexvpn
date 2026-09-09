@@ -87,6 +87,13 @@
   .bar-cell .fill { height: 100%; background: var(--accent); }
   .muted { color: var(--muted); }
 
+  table.matrix th, table.matrix td { padding: 6px 8px; }
+  table.matrix th.rot { font-size: 11.5px; line-height: 1.2; white-space: normal;
+                        min-width: 74px; max-width: 110px; vertical-align: bottom; }
+  table.matrix td.cell { text-align: center; font-variant-numeric: tabular-nums; }
+  table.matrix td.zero { color: #c9d1dc; }
+  table.matrix td.cell b { display: block; border-radius: 5px; padding: 3px 0; }
+
   dialog { border: none; border-radius: 14px; padding: 0; max-width: 720px; width: 92vw;
            box-shadow: 0 20px 60px rgba(16,32,60,.28); }
   dialog::backdrop { background: rgba(16,32,60,.35); }
@@ -163,6 +170,20 @@
     <svg class="chart" id="tunnelChart"></svg>
     <div class="legend" id="tunnelLegend"></div>
     <div class="scroll" style="margin-top:14px"><table id="tunnelTable"></table></div>
+  </div>
+
+  <div class="panel">
+    <div class="head">
+      <div>
+        <h2>Оператор × туннель</h2>
+        <div class="sub">Сколько людей с каждой сети реально ходило через каждый туннель.
+          Строка не суммируется в итог оператора: один человек за сутки пользуется несколькими
+          туннелями и попадает в несколько клеток. <b>Пустая клетка — это «никто с этой сети сюда
+          не заходил»</b>, а вот не выбрали или не работает — по логу не различить.
+          Релейных туннелей здесь нет: у них виден адрес Москвы, а не сеть человека.</div>
+      </div>
+    </div>
+    <div class="scroll"><table class="matrix" id="matrixTable"></table></div>
   </div>
 
   <div class="cols">
@@ -481,6 +502,33 @@ function drawMultiChart(data) {
     '<span><i style="background:' + PALETTE[index % PALETTE.length] + '"></i>' + line.title + "</span>").join("");
 }
 
+function drawMatrix(matrix) {
+  const table = $("matrixTable");
+  if (!matrix || !matrix.rows.length) {
+    table.innerHTML = '<tbody><tr><td class="empty">За этот период данных нет</td></tr></tbody>';
+    return;
+  }
+  const peak = Math.max(...matrix.rows.flatMap((r) => r.cells), 1);
+  const kinds = { mobile: "моб.", fixed: "дом.", unknown: "—" };
+
+  const head = "<thead><tr><th>Оператор</th><th></th><th class='num'>Всего</th>" +
+    matrix.tunnels.map((t) => '<th class="rot">' + t.title + "</th>").join("") + "</tr></thead>";
+
+  const body = "<tbody>" + matrix.rows.map((row) =>
+    "<tr><td>" + row.operator + '</td><td><span class="tag">' + (kinds[row.network] || "—") +
+    '</span></td><td class="num">' + fmtInt(row.people) + "</td>" +
+    row.cells.map((value) => {
+      if (!value) return '<td class="cell zero">·</td>';
+      // Чем насыщеннее клетка, тем больше людей: глазами матрица читается
+      // пятнами, а не числами — сразу видно, где у оператора провал.
+      const weight = 0.12 + 0.55 * (value / peak);
+      return '<td class="cell"><b style="background:rgba(18,184,134,' + weight.toFixed(2) +
+             ')">' + fmtInt(value) + "</b></td>";
+    }).join("") + "</tr>").join("") + "</tbody>";
+
+  table.innerHTML = head + body;
+}
+
 function bar(value, peak) {
   const width = peak ? Math.round(100 * value / peak) : 0;
   return '<div class="bar-cell"><div class="track"><div class="fill" style="width:' + width +
@@ -510,6 +558,8 @@ async function loadTunnels() {
         return '<span class="muted">не видно</span>';
       } },
   ], data.tunnels);
+
+  drawMatrix(data.matrix);
 
   const totalPeople = data.networks.reduce((sum, r) => sum + r.people, 0) || 1;
   drawTable($("networkTable"), [

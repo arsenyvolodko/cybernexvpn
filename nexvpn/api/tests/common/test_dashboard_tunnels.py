@@ -200,3 +200,67 @@ def test_relay_tunnel_gets_its_network_split(plan):
 
     assert row["network_in_clients"] is True, "цифры в адресах, и это надо подписать"
     assert (row["mobile"], row["fixed"]) == (6, 2)
+
+
+# --- сводная «оператор × туннель» ---
+
+
+def test_matrix_crosses_operators_with_tunnels(plan):
+    """То, ради чего всё затевалось: видно, кто с какой сети куда ходит."""
+    usage(plan, panel_id=1, asn=41330, operator="T2", network="mobile",
+          node="de1-ovh", tag="VLESS-REALITY", connections=100)
+    usage(plan, panel_id=2, asn=12389, operator="RT", network="fixed",
+          node="de1-ovh", tag="VLESS-REALITY", connections=50)
+    usage(plan, panel_id=3, asn=12389, operator="RT", network="fixed",
+          node="pl1-ovh", tag="VLESS-GRPC", connections=10)
+
+    matrix = queries.operator_tunnel_matrix(period_of())
+
+    assert [row["operator"] for row in matrix["rows"]] == ["RT", "T2"], "сверху тот, у кого людей больше"
+    columns = {tunnel["title"]: index for index, tunnel in enumerate(matrix["tunnels"])}
+    rt = next(row for row in matrix["rows"] if row["operator"] == "RT")
+    t2 = next(row for row in matrix["rows"] if row["operator"] == "T2")
+
+    germany = columns["🇩🇪 Германия | Быстрый"]
+    assert rt["cells"][germany] == 1 and t2["cells"][germany] == 1
+
+
+def test_empty_cell_means_nobody_from_that_network(plan):
+    """Пустая клетка — главный сигнал таблицы: на этой сети туннелем не ходят."""
+    usage(plan, panel_id=1, asn=41330, operator="T2", network="mobile",
+          node="de1-ovh", tag="VLESS-REALITY")
+    usage(plan, panel_id=2, asn=12389, operator="RT", network="fixed",
+          node="pl1-ovh", tag="VLESS-GRPC")
+
+    matrix = queries.operator_tunnel_matrix(period_of())
+    columns = {tunnel["title"]: index for index, tunnel in enumerate(matrix["tunnels"])}
+    t2 = next(row for row in matrix["rows"] if row["operator"] == "T2")
+
+    assert t2["cells"][columns["🇩🇪 Германия | Быстрый"]] == 1
+    assert t2["cells"][columns["VLESS-GRPC @ pl1-ovh"]] == 0, "на Tele2 сюда никто не заходил"
+
+
+def test_matrix_counts_people_once_per_cell(plan):
+    """Человек, сходивший на туннель дважды за период, — всё равно один."""
+    subscription = SubscriptionFactory(plan=plan, panel_user_id=1)
+    for day in (TODAY, TODAY - dt.timedelta(days=1)):
+        InboundUsageDay.objects.create(
+            user=subscription.user, node_name="de1-ovh", inbound_tag="VLESS-REALITY",
+            via_relay=False, date=day, connections=10, asn=41330,
+            operator="T2", network="mobile",
+        )
+
+    matrix = queries.operator_tunnel_matrix(period_of())
+
+    assert matrix["rows"][0]["cells"][0] == 1
+
+
+def test_relay_tunnels_stay_out_of_the_matrix(plan):
+    """У релейных сеть не определяется — им в этой таблице места нет."""
+    usage(plan, panel_id=1, node="eu1-ovh", tag="Hysteria2-Obfs", relay=True, connections=999)
+    usage(plan, panel_id=2, asn=41330, operator="T2", network="mobile")
+
+    matrix = queries.operator_tunnel_matrix(period_of())
+
+    assert all("Франция" not in tunnel["title"] for tunnel in matrix["tunnels"])
+    assert len(matrix["tunnels"]) == 1

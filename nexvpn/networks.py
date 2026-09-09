@@ -63,6 +63,15 @@ MOBILE_HINTS = ("T2 RUSSIA", "TELE2", "SONICDUO", "MEGAFON", "MF-", "YOTA", "MOT
 FIXED_HINTS = ("TELECOM", "CABLE", "NET", "BROADBAND", "DOM.RU", "ERTH")
 
 
+# Сети, про которые известно, чьи они, но неизвестно — мобильные или домашние.
+# Держим здесь списком, чтобы не тянуло вписать наугад: у Билайна и МТС одна
+# компания раздаёт и то и другое, и ошибка тут не видна на глаз, а цифру
+# «сколько людей на мобильном» портит заметно.
+UNRESOLVED = {
+    16345: "Билайн (BEE-AS) — мобильный или домашний не подтверждён",
+}
+
+
 def classify(asn: int, operator: str = "") -> str:
     """Тип сети. `UNKNOWN`, если ни таблица, ни название ничего не говорят."""
     if not asn:
@@ -70,6 +79,8 @@ def classify(asn: int, operator: str = "") -> str:
     known = KNOWN.get(asn)
     if known:
         return known
+    if asn in UNRESOLVED:
+        return UNKNOWN
 
     name = (operator or "").upper()
     if any(hint in name for hint in MOBILE_HINTS):

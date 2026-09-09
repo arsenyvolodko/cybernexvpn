@@ -119,6 +119,7 @@ def tunnels(request):
             "tunnels": queries.tunnels(period),
             "networks": queries.networks(period),
             "operators": queries.operators(period),
+            "matrix": queries.operator_tunnel_matrix(period),
             "series": queries.tunnel_series(period, metric),
         }
     )
