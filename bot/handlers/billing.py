@@ -134,16 +134,28 @@ async def handle_plan_details(call: CallbackQuery, callback_data: PlanCallback, 
         return
 
     if option.is_upgrade:
-        text = texts.PLAN_UPGRADE.format(
-            plan=texts.plural_devices(option.device_limit),
-            price=option.price_month,
-            days_left=texts.plural_days(subscription.days_left),
-            converted=texts.plural_days(option.converted_days),
-        )
-        if option.topup_price:
-            text += texts.PLAN_UPGRADE_TOPUP.format(
-                price=option.topup_price, days=texts.plural_days(30)
+        if option.converted_days < 1:
+            # Округление остатка по курсу нового тарифа дало 0 дней: бесплатный
+            # переход означал бы «нажми и подписка сразу кончится». Такую
+            # опцию не предлагаем вовсе — только доплату за полный период.
+            text = texts.PLAN_UPGRADE_NO_FREE_OPTION.format(
+                plan=texts.plural_devices(option.device_limit),
+                price=option.price_month,
+                days_left=texts.plural_days(subscription.days_left),
+                topup_price=option.topup_price,
+                days=texts.plural_days(30),
             )
+        else:
+            text = texts.PLAN_UPGRADE.format(
+                plan=texts.plural_devices(option.device_limit),
+                price=option.price_month,
+                days_left=texts.plural_days(subscription.days_left),
+                converted=texts.plural_days(option.converted_days),
+            )
+            if option.topup_price:
+                text += texts.PLAN_UPGRADE_TOPUP.format(
+                    price=option.topup_price, days=texts.plural_days(30)
+                )
     else:
         text = texts.PLAN_DOWNGRADE.format(
             plan=texts.plural_devices(option.device_limit),

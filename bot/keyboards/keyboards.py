@@ -373,13 +373,20 @@ def plan_list(options) -> InlineKeyboardMarkup:
 
 
 def plan_change(option) -> InlineKeyboardMarkup:
-    """У повышения два honest-варианта, у понижения — один отложенный."""
-    items = [
-        InlineKeyboardButton(
-            text=ButtonsStorage.CHANGE_PLAN_FREE.text,
-            callback_data=PlanCallback(device_limit=option.device_limit, action="free").pack(),
+    """У повышения два honest-варианта, у понижения — один отложенный.
+
+    «Перейти бесплатно» не показываем, если остаток по курсу нового тарифа
+    округлился до 0 дней: это не бесплатный переход, а способ прямо сейчас
+    обнулить активную подписку. Доплата за полный период при этом остаётся.
+    """
+    items = []
+    if option.converted_days >= 1:
+        items.append(
+            InlineKeyboardButton(
+                text=ButtonsStorage.CHANGE_PLAN_FREE.text,
+                callback_data=PlanCallback(device_limit=option.device_limit, action="free").pack(),
+            )
         )
-    ]
     if option.topup_price:
         items.append(
             InlineKeyboardButton(
