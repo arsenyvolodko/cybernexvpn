@@ -145,6 +145,13 @@ def expired_plans(options) -> InlineKeyboardMarkup:
     return _rows(*items, back_to=EXPIRED_HOME, with_menu=False)
 
 
+def device_over_limit_notice() -> InlineKeyboardMarkup:
+    """Под разовым сообщением о превышении лимита. Только «Мои устройства» —
+    решать самому, что удалить и что докупить, здесь без «Назад»: это
+    сообщение, которое пришло само, а не экран, куда пришёл человек."""
+    return _rows(ButtonsStorage.MY_DEVICES)
+
+
 def trim_warning() -> InlineKeyboardMarkup:
     """Выбор способа: снести самые давние автоматически или отобрать вручную."""
     return _rows(
