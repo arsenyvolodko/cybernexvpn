@@ -145,6 +145,16 @@ def expired_plans(options) -> InlineKeyboardMarkup:
     return _rows(*items, back_to=EXPIRED_HOME, with_menu=False)
 
 
+def connect_no_slots() -> InlineKeyboardMarkup:
+    """Экран «Подключиться», когда лимит уже выбран весь.
+
+    Отдельно от `device_over_limit_notice`, хоть их тексты и близки: это
+    экран, куда человек пришёл сам (кнопкой), а не сообщение, которое пришло
+    к нему само, — поэтому здесь есть «Назад», а там нет.
+    """
+    return _rows(ButtonsStorage.MY_DEVICES, ButtonsStorage.CHANGE_PLAN, back_to=MENU)
+
+
 def device_over_limit_notice() -> InlineKeyboardMarkup:
     """Под разовым сообщением о превышении лимита: удалить лишнее самому или
     поднять тариф под уже подключённые устройства. Без «Назад» — это

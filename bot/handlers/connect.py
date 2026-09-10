@@ -73,7 +73,10 @@ async def connect_screen(user: NexUser):
         return texts.CONNECT_NEEDS_SUBSCRIPTION, keyboards.expired()
     if not view.can_add_device:
         # Панель всё равно откажет новому устройству — честнее сказать заранее.
-        return texts.CONNECT_NO_SLOTS.format(limit=view.device_limit), keyboards.only_back()
+        return (
+            texts.CONNECT_NO_SLOTS.format(plan=view.subscription.plan.name),
+            keyboards.connect_no_slots(),
+        )
     return texts.CONNECT_CHOOSE_PLATFORM, keyboards.platforms()
 
 
