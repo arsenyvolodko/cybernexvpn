@@ -65,6 +65,20 @@ def _api_photo(payload: dict, photo_path) -> bool:
     return True
 
 
+def notify_device_limit_reached(chat_id: int, devices: list[str]) -> bool:
+    """Новое устройство отклонено — сверх лимита тарифа. Отдельное сообщение,
+    не правка существующего экрана: человек мог быть где угодно в боте, а
+    произошло это не по его нажатию, а по попытке подключиться в приложении.
+    """
+    listed = "\n".join(f"· {title}" for title in devices) or "—"
+    text = texts.DEVICE_LIMIT_REACHED.format(list=listed)
+    markup = keyboards.device_over_limit_notice().model_dump(exclude_none=True)
+    return _api(
+        "sendMessage",
+        {"chat_id": chat_id, "text": text, "parse_mode": "HTML", "reply_markup": markup},
+    )
+
+
 def notify_device_connected(chat_id: int, message_id: int, device_title: str) -> None:
     """Сменить экран «Добавить подписку» на «Готово» — с картинкой.
 

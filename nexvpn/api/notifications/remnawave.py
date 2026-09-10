@@ -92,12 +92,74 @@ def handle_webhook(request: Request) -> Response:
     return Response(status=200)
 
 
+def _enforce_device_limit(panel_user_id: int, hwid: str | None) -> bool:
+    """Отклонить устройство, если им пробили лимит тарифа. True — отклонили.
+
+    Панель лимит не проверяет (`hwidSettings.enabled=false` — контроль внутри
+    неё выключен и трогать это отдельное решение), поэтому здесь единственное
+    место, где лимит вообще на что-то влияет. Снимаем именно то устройство,
+    которое только что добавили: старые уже были там, когда человек ещё
+    укладывался в тариф, и трогать их в ответ на чужую попытку подключиться
+    незачем.
+    """
+    if not hwid:
+        # Без hwid нельзя понять, что именно снимать — лучше промолчать,
+        # чем отключить не то устройство наугад.
+        logger.warning("Событие о новом устройстве без hwid, лимит не проверяю")
+        return False
+
+    subscription = (
+        Subscription.objects.select_related("user", "plan")
+        .filter(panel_user_id=panel_user_id)
+        .first()
+    )
+    if subscription is None:
+        return False
+
+    from nexvpn.subscription import panel_sync
+
+    try:
+        devices = panel_sync.list_devices(subscription)
+    except Exception:
+        logger.warning("Панель не отдала устройства для проверки лимита %s", panel_user_id, exc_info=True)
+        return False
+
+    if len(devices) <= subscription.device_limit:
+        return False
+
+    try:
+        panel_sync.remove_device(subscription, hwid)
+    except Exception:
+        logger.exception("Не удалось снять устройство сверх лимита: user=%s hwid=%s", panel_user_id, hwid)
+        return False
+
+    from bot.notify import notify_device_limit_reached
+    from bot.services import _device_title
+
+    remaining = [d for d in devices if d.get("hwid") != hwid]
+    notify_device_limit_reached(
+        chat_id=subscription.user_id,
+        devices=[_device_title(d) for d in remaining],
+    )
+    logger.info(
+        "Устройство сверх лимита отклонено: user=%s hwid=%s лимит=%s",
+        subscription.user_id, hwid, subscription.device_limit,
+    )
+    return True
+
+
 def _handle_device_added(data: dict) -> None:
-    """Появилось новое устройство — если человек его сейчас ждёт, сказать ему."""
+    """Появилось новое устройство — либо отклонить сверх лимита, либо сказать
+    ждущему человеку, что оно подключилось."""
     user_id = data.get("userId") or (data.get("user") or {}).get("telegramId")
     hwid = data.get("hwid")
     if user_id is None:
         logger.info("Событие об устройстве без userId: %s", data)
+        return
+
+    if _enforce_device_limit(user_id, hwid):
+        # Устройство снято — праздновать подключение уже нечего, и ждущий
+        # экран (если есть) должен остаться как был, а не показать «готово».
         return
 
     watch = DeviceConnectionWatch.objects.filter(user__subscription__panel_user_id=user_id).first()

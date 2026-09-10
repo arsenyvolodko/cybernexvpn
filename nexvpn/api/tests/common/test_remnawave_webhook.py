@@ -242,3 +242,161 @@ def test_broken_date_does_not_break_the_webhook(client, synced_subscription):
 
     assert post(client, body).status_code == 200
     assert Subscription.objects.get(pk=synced_subscription.pk).expires_at == synced_subscription.expires_at
+
+
+# --- запрет добавлять устройства сверх лимита ---
+
+
+def hwid_payload(hwid, panel_user_id=PANEL_USER_ID):
+    return {
+        "scope": "user_hwid_devices",
+        "event": "user_hwid_devices.added",
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "data": {"userId": panel_user_id, "hwid": hwid, "deviceModel": "iPhone 15"},
+    }
+
+
+@pytest.fixture
+def panel_with_devices(monkeypatch):
+    """Панель с управляемым списком устройств, удаление отслеживается."""
+    state = {"devices": [], "deleted": []}
+
+    def list_devices(subscription, client=None):
+        return state["devices"]
+
+    def remove_device(subscription, hwid, client=None):
+        state["deleted"].append(hwid)
+        state["devices"] = [d for d in state["devices"] if d["hwid"] != hwid]
+
+    monkeypatch.setattr("nexvpn.subscription.panel_sync.list_devices", list_devices)
+    monkeypatch.setattr("nexvpn.subscription.panel_sync.remove_device", remove_device)
+    return state
+
+
+@override_settings(REMNAWAVE_WEBHOOK_SECRET=SECRET)
+def test_extra_device_over_the_limit_is_removed(client, panel_with_devices, monkeypatch):
+    from nexvpn.enums import PanelSyncStatusEnum
+
+    monkeypatch.setattr("bot.notify.notify_device_limit_reached", lambda *a, **kw: True)
+    subscription = SubscriptionFactory(
+        plan=PlanFactory(device_limit=1, price_month=150),
+        panel_user_id=PANEL_USER_ID, panel_status=PanelSyncStatusEnum.SYNCED,
+    )
+    panel_with_devices["devices"] = [
+        {"hwid": "OLD", "deviceModel": "Старый телефон"},
+        {"hwid": "NEW", "deviceModel": "Новый телефон"},
+    ]
+
+    assert post(client, hwid_payload("NEW")).status_code == 200
+
+    assert panel_with_devices["deleted"] == ["NEW"], "снимаем именно новое, а не старое"
+    assert [d["hwid"] for d in panel_with_devices["devices"]] == ["OLD"]
+
+
+@override_settings(REMNAWAVE_WEBHOOK_SECRET=SECRET)
+def test_device_within_the_limit_is_left_alone(client, panel_with_devices):
+    from nexvpn.enums import PanelSyncStatusEnum
+
+    SubscriptionFactory(
+        plan=PlanFactory(device_limit=3, price_month=400),
+        panel_user_id=PANEL_USER_ID, panel_status=PanelSyncStatusEnum.SYNCED,
+    )
+    panel_with_devices["devices"] = [{"hwid": "NEW", "deviceModel": "Телефон"}]
+
+    assert post(client, hwid_payload("NEW")).status_code == 200
+
+    assert panel_with_devices["deleted"] == []
+
+
+@override_settings(REMNAWAVE_WEBHOOK_SECRET=SECRET)
+def test_user_gets_told_which_devices_remain(client, panel_with_devices, monkeypatch):
+    from nexvpn.enums import PanelSyncStatusEnum
+
+    sent = {}
+    monkeypatch.setattr(
+        "bot.notify.notify_device_limit_reached",
+        lambda chat_id, devices: sent.update(chat_id=chat_id, devices=devices) or True,
+    )
+    subscription = SubscriptionFactory(
+        plan=PlanFactory(device_limit=1, price_month=150),
+        panel_user_id=PANEL_USER_ID, panel_status=PanelSyncStatusEnum.SYNCED,
+    )
+    panel_with_devices["devices"] = [
+        {"hwid": "OLD", "deviceModel": "Старый телефон"},
+        {"hwid": "NEW", "deviceModel": "Новый телефон"},
+    ]
+
+    post(client, hwid_payload("NEW"))
+
+    assert sent["chat_id"] == subscription.user_id
+    assert sent["devices"] == ["Старый телефон"], "новое уже снято, показываем то, что осталось"
+
+
+@override_settings(REMNAWAVE_WEBHOOK_SECRET=SECRET)
+def test_missing_hwid_does_not_remove_anything(client, panel_with_devices):
+    from nexvpn.enums import PanelSyncStatusEnum
+
+    SubscriptionFactory(
+        plan=PlanFactory(device_limit=1, price_month=150),
+        panel_user_id=PANEL_USER_ID, panel_status=PanelSyncStatusEnum.SYNCED,
+    )
+    panel_with_devices["devices"] = [
+        {"hwid": "OLD", "deviceModel": "Старый"}, {"hwid": "NEW", "deviceModel": "Новый"},
+    ]
+    body = hwid_payload("NEW")
+    del body["data"]["hwid"]
+
+    assert post(client, body).status_code == 200
+    assert panel_with_devices["deleted"] == []
+
+
+@override_settings(REMNAWAVE_WEBHOOK_SECRET=SECRET)
+def test_silent_panel_does_not_remove_anything(client, monkeypatch):
+    from nexvpn.enums import PanelSyncStatusEnum
+    from nexvpn.remnawave import RemnawaveError
+
+    monkeypatch.setattr(
+        "nexvpn.subscription.panel_sync.list_devices",
+        lambda *a, **kw: (_ for _ in ()).throw(RemnawaveError("нет связи")),
+    )
+    SubscriptionFactory(
+        plan=PlanFactory(device_limit=1, price_month=150),
+        panel_user_id=PANEL_USER_ID, panel_status=PanelSyncStatusEnum.SYNCED,
+    )
+
+    assert post(client, hwid_payload("NEW")).status_code == 200
+
+
+@override_settings(REMNAWAVE_WEBHOOK_SECRET=SECRET)
+def test_watch_flow_still_works_when_within_the_limit(client, panel_with_devices, watching_user, sent):
+    """Обычное подключение (в пределах лимита) по-прежнему сообщает об успехе."""
+    panel_with_devices["devices"] = [{"hwid": "NEW-HWID", "deviceModel": "iPhone 15"}]
+
+    assert post(client, payload()).status_code == 200
+
+    assert len(sent) == 1
+    assert panel_with_devices["deleted"] == []
+
+
+@override_settings(REMNAWAVE_WEBHOOK_SECRET=SECRET)
+def test_rejected_device_does_not_also_announce_success(client, panel_with_devices, watching_user, sent, monkeypatch):
+    """Устройство сняли за лимит — экран ожидания не должен сказать «готово»."""
+    from nexvpn.enums import PanelSyncStatusEnum
+    from nexvpn.models import Subscription
+
+    monkeypatch.setattr("bot.notify.notify_device_limit_reached", lambda *a, **kw: True)
+
+    # Тот же пользователь, что ждёт подключения: подгоняем его тариф под
+    # лимит в один слот, а не заводим вторую подписку на тот же panel_user_id
+    # (иначе .filter(panel_user_id=...).first() может достать не ту).
+    Subscription.objects.filter(user=watching_user).update(
+        plan=PlanFactory(device_limit=1, price_month=150), panel_status=PanelSyncStatusEnum.SYNCED,
+    )
+    panel_with_devices["devices"] = [
+        {"hwid": "OLD", "deviceModel": "Старый"}, {"hwid": "NEW-HWID", "deviceModel": "iPhone 15"},
+    ]
+
+    post(client, payload())
+
+    assert sent == [], "не два сообщения сразу — только про лимит"
+    assert panel_with_devices["deleted"] == ["NEW-HWID"]
