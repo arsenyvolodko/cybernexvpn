@@ -94,6 +94,68 @@ def remove_device(subscription: Subscription, hwid: str, client: RemnawaveClient
     client.delete_device(subscription.panel_user_id, hwid)
 
 
+def reject_devices_added_over_limit(
+    subscription: Subscription, client: RemnawaveClient | None = None
+) -> list[dict] | None:
+    """Снять устройства, добавленные сверх лимита с прошлой проверки.
+
+    Существует потому, что панель не шлёт вебхук на добавление устройства:
+    `user_hwid_devices.added` заявлено в её API, но эмпирически (10.09.2026,
+    72+ часов живого трафика с реальными добавлениями) ни разу не пришло —
+    только `.deleted` и `user.modified`. Опрос — единственный рабочий сигнал.
+
+    Трогает только то, что появилось **после** прошлой проверки. Устройства,
+    которые уже были сверх лимита до неё, не удаляются автоматически — с
+    такими людьми разговор отдельный, а не тихое стирание. Возвращает `None`,
+    если это первое наблюдение подписки (тогда только запоминает набор) или
+    ничего снимать не пришлось; список снятых устройств иначе.
+    """
+    client = client or RemnawaveClient()
+    devices = list_devices(subscription, client=client)
+    current = {d["hwid"]: d for d in devices if d.get("hwid")}
+
+    if subscription.known_device_hwids is None:
+        subscription.known_device_hwids = list(current)
+        subscription.save(update_fields=["known_device_hwids"])
+        return None
+
+    known = set(subscription.known_device_hwids)
+    limit = subscription.device_limit
+    if len(current) <= limit:
+        if set(current) != known:
+            subscription.known_device_hwids = list(current)
+            subscription.save(update_fields=["known_device_hwids"])
+        return None
+
+    new_hwids = set(current) - known
+    if not new_hwids:
+        # Сверх лимита, но давно, ничего нового не появилось — не наше дело.
+        return None
+
+    # Из новых снимаем самые свежие по регистрации — ровно столько, сколько
+    # нужно, чтобы влезть в лимит. Порядок внутри новых значения не имеет
+    # (все они одинаково «нарушители»), но по времени регистрации — самый
+    # понятный человеку критерий, если он вообще станет разбираться, что снято.
+    excess = len(current) - limit
+    offenders = sorted(
+        (current[hwid] for hwid in new_hwids),
+        key=lambda d: d.get("createdAt") or "",
+        reverse=True,
+    )[:excess]
+
+    for device in offenders:
+        remove_device(subscription, device["hwid"], client=client)
+        logger.info(
+            "Устройство сверх лимита снято при опросе: user=%s hwid=%s",
+            subscription.user_id, device["hwid"],
+        )
+
+    removed = {d["hwid"] for d in offenders}
+    subscription.known_device_hwids = [hwid for hwid in current if hwid not in removed]
+    subscription.save(update_fields=["known_device_hwids"])
+    return offenders
+
+
 def trim_devices_to_limit(subscription: Subscription, client: RemnawaveClient | None = None) -> list[dict]:
     """Снести устройства сверх лимита тарифа, оставив самые свежие по активности.
 

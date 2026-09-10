@@ -35,4 +35,10 @@ app.conf.beat_schedule = {
         'task': 'nexvpn.tasks.take_usage_snapshot',
         'schedule': crontab(minute='*/10'),
     },
+    # Запрет добавлять устройства сверх лимита тарифа. Опросом, не вебхуком —
+    # `user_hwid_devices.added` эмпирически не приходит от панели вовсе.
+    'enforce-device-limits': {
+        'task': 'nexvpn.tasks.enforce_device_limits',
+        'schedule': crontab(minute='*/10'),
+    },
 }

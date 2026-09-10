@@ -86,6 +86,65 @@ def sync_panel():
 
 
 @shared_task()
+def enforce_device_limits():
+    """Не дать накопиться устройствам сверх лимита тарифа.
+
+    Реагирует опросом, а не вебхуком: `user_hwid_devices.added` заявлено в API
+    панели, но эмпирически (10.09.2026) ни разу не пришло за 72+ часов живых
+    добавлений. Опрос — единственный сигнал, который действительно работает.
+
+    При DEBUG=True не делаем ничего — та же причина, что у `sync_panel`:
+    локальный `.env` смотрит на боевую панель, и удалять боевые устройства
+    с машины разработчика нельзя ни при каких условиях.
+    """
+    from django.conf import settings
+
+    if settings.DEBUG:
+        logger.warning(
+            "DEBUG=True — пропускаю проверку лимита устройств: панель боевая (%s)",
+            settings.PANEL_API_URL,
+        )
+        return {"skipped": True}
+
+    from nexvpn.models import Subscription
+
+    checked = removed_total = notified = failed = 0
+    for subscription in Subscription.objects.exclude(panel_user_id=None).select_related("user", "plan"):
+        checked += 1
+        try:
+            removed = panel_sync.reject_devices_added_over_limit(subscription)
+        except Exception:
+            failed += 1
+            logger.warning(
+                "Не смог проверить лимит устройств для %s", subscription.user_id, exc_info=True
+            )
+            continue
+        if not removed:
+            continue
+
+        removed_total += len(removed)
+        try:
+            devices = panel_sync.list_devices(subscription)
+        except Exception:
+            devices = []
+
+        from bot.notify import notify_device_limit_reached
+        from bot.services import _device_title
+
+        if notify_device_limit_reached(
+            chat_id=subscription.user_id, devices=[_device_title(d) for d in devices]
+        ):
+            notified += 1
+
+    if removed_total:
+        logger.info(
+            "Лимит устройств: проверено %s, снято %s, оповещено %s, ошибок %s",
+            checked, removed_total, notified, failed,
+        )
+    return {"checked": checked, "removed": removed_total, "notified": notified, "failed": failed}
+
+
+@shared_task()
 def take_usage_snapshot():
     """Срез использования: кто онлайн, на какой ноде, сколько прокачал.
 

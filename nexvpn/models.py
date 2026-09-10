@@ -155,6 +155,21 @@ class Subscription(models.Model):
     payment_method_id = models.CharField(max_length=63, null=True, blank=True, default=None)
     auto_renew_agreed = models.BooleanField(default=False)
 
+    # Последний известный набор HWID — точка отсчёта для запрета добавлять
+    # устройства сверх лимита (см. nexvpn.tasks.enforce_device_limits). Нужен
+    # потому, что панель не шлёт вебхук на добавление устройства: событие
+    # `user_hwid_devices.added` заявлено в её API, но эмпирически (проверено
+    # 10.09.2026, 72+ часов живого трафика с добавлениями) ни разу не пришло —
+    # только `.deleted` и `user.modified`. Поэтому лимит проверяется опросом,
+    # а это поле — с чем сравнивать, чтобы не наказывать за устройства,
+    # заведённые ДО того, как за подпиской начали следить.
+    #
+    # None — подписку ещё ни разу не проверяли: при первом наблюдении текущий
+    # набор просто запоминается, ничего не удаляется. Так уже существующие
+    # устройства (в том числе у тех, кто и так превысил лимит до этой фичи)
+    # не сносятся автоматом — с ними разговор отдельный, человеческий.
+    known_device_hwids = models.JSONField(null=True, blank=True, default=None)
+
     @property
     def is_active(self) -> bool:
         return self.expires_at > now()
