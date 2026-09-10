@@ -146,10 +146,10 @@ def expired_plans(options) -> InlineKeyboardMarkup:
 
 
 def device_over_limit_notice() -> InlineKeyboardMarkup:
-    """Под разовым сообщением о превышении лимита. Только «Мои устройства» —
-    решать самому, что удалить и что докупить, здесь без «Назад»: это
+    """Под разовым сообщением о превышении лимита: удалить лишнее самому или
+    поднять тариф под уже подключённые устройства. Без «Назад» — это
     сообщение, которое пришло само, а не экран, куда пришёл человек."""
-    return _rows(ButtonsStorage.MY_DEVICES)
+    return _rows(ButtonsStorage.MY_DEVICES, ButtonsStorage.CHANGE_PLAN)
 
 
 def trim_warning() -> InlineKeyboardMarkup:
