@@ -314,6 +314,11 @@ def _user_row(user: NexUser, spent: int = 0) -> dict:
         "is_legacy": user.is_legacy,
         "plan": subscription.plan.name if subscription else "",
         "expires_at": _iso(subscription.expires_at) if subscription else None,
+        # Три состояния, а не два. С тех пор как пробный стартует по
+        # «Подключиться», а не по /start, «подписки нет вовсе» стало обычным
+        # делом: человек открыл бота и остановился. Без этого признака такой
+        # человек показывался как «подписка истекла», хотя её и не было.
+        "has_subscription": subscription is not None,
         "is_active": bool(subscription and subscription.expires_at > timezone.now()),
         "first_connected_at": _iso(presence.first_connected_at) if presence else None,
         "online_at": _iso(presence.online_at) if presence else None,

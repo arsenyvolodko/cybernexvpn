@@ -544,8 +544,9 @@ async function loadUsers() {
     { title: "Имя", cell: (r) => r.name || "—", sort: (r) => r.name || "" },
     { title: "Тариф", cell: (r) => r.plan || "—", sort: (r) => r.plan || "" },
     { title: "Подписка до", sort: (r) => stamp(r.expires_at),
-      cell: (r) => fmtDate(r.expires_at) +
-        (r.is_active ? "" : ' <span class="tag no">истекла</span>') },
+      cell: (r) => !r.has_subscription
+        ? '<span class="tag no">не заводил</span>'
+        : fmtDate(r.expires_at) + (r.is_active ? "" : ' <span class="tag no">истекла</span>') },
     { title: "Последний онлайн", sort: (r) => r.first_connected_at ? stamp(r.online_at) : null,
       cell: (r) => r.first_connected_at
         ? fmtDate(r.online_at, true) : '<span class="tag no">не подключался</span>' },
@@ -693,7 +694,9 @@ async function openUser(id) {
     (u.is_legacy ? " · перенесён из старой версии" : "") + "</div>";
   html += '<div class="kv">' +
     kv("Тариф", u.plan || "—") +
-    kv("Подписка до", fmtDate(u.expires_at, true) + (u.is_active ? "" : " (истекла)")) +
+    kv("Подписка до", !u.has_subscription
+      ? "не заводил"
+      : fmtDate(u.expires_at, true) + (u.is_active ? "" : " (истекла)")) +
     kv("Первое подключение", fmtDate(u.first_connected_at)) +
     kv("Последний онлайн", fmtDate(u.online_at, true)) +
     kv("Всего трафика", fmtBytes(u.traffic)) +
