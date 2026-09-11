@@ -199,6 +199,38 @@ class Subscription(models.Model):
         return f"{self.user}: {self.plan.device_limit} устр. до {self.expires_at:%d.%m.%Y}"
 
 
+class OnboardingNudge(models.Model):
+    """Какие подталкивания «ты ещё не подключился» новичку уже отправлены.
+
+    Та же роль, что у `SentReminder`, но для онбординга: задача крутится часто,
+    а момент «прошло 10 минут» держится вечно — без отметки человек получал бы
+    одно и то же каждые пару минут.
+
+    `sent=False` означает «шаг закрыт, но сообщение намеренно не отправлено»:
+    так гасятся просроченные шаги (бот лежал полдня — человек не должен
+    получить четыре сообщения подряд) и все оставшиеся шаги, когда устройство
+    наконец появилось. Отличать это от настоящей отправки нужно, чтобы по
+    таблице можно было понять, что человек реально увидел.
+    """
+
+    user = models.ForeignKey(NexUser, on_delete=models.CASCADE, related_name="onboarding_nudges")
+    step_minutes = models.PositiveIntegerField(help_text="Через сколько минут после первого захода")
+    sent = models.BooleanField(default=True, help_text="False — шаг закрыт без отправки")
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "подталкивание новичку"
+        verbose_name_plural = "Подталкивания новичкам"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "step_minutes"], name="unique_onboarding_nudge_per_user"
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user_id}: через {self.step_minutes} мин."
+
+
 class SentReminder(models.Model):
     """Какие напоминания об окончании подписки уже отправлены.
 

@@ -145,6 +145,12 @@ def expired_plans(options) -> InlineKeyboardMarkup:
     return _rows(*items, back_to=EXPIRED_HOME, with_menu=False)
 
 
+def onboarding_nudge() -> InlineKeyboardMarkup:
+    """Под подталкиванием новичку. Одна кнопка и никакого «Назад»: сообщение
+    пришло само, возвращаться человеку некуда — есть только путь вперёд."""
+    return _rows(ButtonsStorage.CONNECT)
+
+
 def connect_no_slots() -> InlineKeyboardMarkup:
     """Экран «Подключиться», когда лимит уже выбран весь.
 

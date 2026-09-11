@@ -86,6 +86,42 @@ def sync_panel():
 
 
 @shared_task()
+def send_onboarding_nudges():
+    """Подтолкнуть новичка, который открыл бота и не добавил ни одного устройства.
+
+    Отдельно от `send_subscription_reminders`, хотя обе шлют сообщения: у той
+    шаг в 10 минут, а здесь первое подталкивание само приходится на 10-ю
+    минуту — на общей сетке оно опаздывало бы вдвое.
+
+    При DEBUG=True не делаем ничего: локальный `.env` смотрит на боевую панель
+    и держит боевой токен бота, так что запущенная на машине разработчика
+    задача написала бы живым людям.
+    """
+    import asyncio
+
+    from django.conf import settings
+
+    if settings.DEBUG:
+        logger.warning("DEBUG=True — пропускаю подталкивания: токен бота боевой")
+        return {"skipped": True}
+
+    from bot.main import build_bot
+    from bot.onboarding import send_due_nudges
+
+    async def _run():
+        bot = build_bot()
+        try:
+            return await send_due_nudges(bot)
+        finally:
+            await bot.session.close()
+
+    sent, failed = asyncio.run(_run())
+    if sent or failed:
+        logger.info("Подталкивания новичкам: отправлено %s, не доставлено %s", sent, failed)
+    return {"sent": sent, "failed": failed}
+
+
+@shared_task()
 def enforce_device_limits():
     """Не дать накопиться устройствам сверх лимита тарифа.
 
