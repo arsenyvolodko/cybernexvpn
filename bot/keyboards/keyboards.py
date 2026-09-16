@@ -136,7 +136,7 @@ def expired_plans(options) -> InlineKeyboardMarkup:
     """Тарифы. Нажатие применяет выбор сразу, без экрана подтверждения."""
     items = [
         InlineKeyboardButton(
-            text=f"{option.name} — {option.price_month}₽/мес",
+            text=f"{option.name} — от {option.min_price_month}₽/мес",
             callback_data=ExpiredCallback(step="pick", device_limit=option.device_limit).pack(),
         )
         for option in options
@@ -381,7 +381,7 @@ def plan_list(options) -> InlineKeyboardMarkup:
             continue
         items.append(
             InlineKeyboardButton(
-                text=f"{option.name} — {option.price_month}₽/мес",
+                text=f"{option.name} — от {option.min_price_month}₽/мес",
                 callback_data=PlanCallback(device_limit=option.device_limit, action="open").pack(),
             )
         )
@@ -408,6 +408,30 @@ def plan_change(option) -> InlineKeyboardMarkup:
             InlineKeyboardButton(
                 text=f"{ButtonsStorage.CHANGE_PLAN_PAY.text} — {option.topup_price}₽",
                 callback_data=PlanCallback(device_limit=option.device_limit, action="pay").pack(),
+            )
+        )
+    return _rows(*items, back_to=ButtonsStorage.CHANGE_PLAN.callback)
+
+
+def plan_change_topup(device_limit: int, options) -> InlineKeyboardMarkup:
+    """Сроки доплаты, когда бесплатный переход недоступен (остаток < суток).
+
+    Тот же принцип, что у продления (`_renew_buttons`): цена месяца в скобках
+    у сроков длиннее месяца, иначе выгоду не заметят.
+    """
+    items = []
+    for option in options:
+        if option.price <= 0:
+            continue
+        label = f"{option.months} мес. — {option.price}₽"
+        if option.months > 1:
+            label += f" ({option.price // option.months}₽/мес)"
+        items.append(
+            InlineKeyboardButton(
+                text=label,
+                callback_data=PlanCallback(
+                    device_limit=device_limit, action="pay", months=option.months
+                ).pack(),
             )
         )
     return _rows(*items, back_to=ButtonsStorage.CHANGE_PLAN.callback)

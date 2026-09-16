@@ -199,6 +199,11 @@ class ReferralView:
     rewarded: int
     days_earned: int
     history: list[tuple[str, int, str]]  # дата, дни, за кого
+    # Текущие ставки программы — из GlobalSettings, правятся в админке без
+    # деплоя. Отдаём готовыми, а не читаем настройки повторно в хендлере:
+    # экран всегда должен показывать то же число, что реально начислится.
+    inviter_days: int
+    invitee_days: int
 
 
 def _device_token(hwid: str) -> str:
@@ -268,6 +273,7 @@ def get_referral_view(user: NexUser) -> ReferralView:
         user=user, reason=SubscriptionEventReasonEnum.REFERRAL_INVITER
     ).order_by("-created_at")[:10]
 
+    billing = GlobalSettings.load()
     return ReferralView(
         link=f"{settings.TG_BOT_URL}?start={user.pk}",
         invited=len(invitations),
@@ -278,6 +284,8 @@ def get_referral_view(user: NexUser) -> ReferralView:
             (event.created_at.strftime("%d.%m.%Y"), event.delta_days, event.comment)
             for event in events
         ],
+        inviter_days=billing.referral_inviter_days,
+        invitee_days=billing.referral_invitee_days,
     )
 
 
@@ -322,10 +330,22 @@ class PlanOption:
     device_limit: int
     name: str
     price_month: int
+    # Минимальная цена месяца на этом тарифе — по самому длинному активному
+    # сроку оплаты (обычно год). Без годовой скидки равна price_month.
+    min_price_month: int
     is_current: bool
     is_upgrade: bool
     converted_days: int
     topup_price: int | None
+
+
+@dataclass
+class PlanTopupOption:
+    """Один вариант доплаты, когда бесплатный переход недоступен."""
+
+    months: int
+    price: int
+    days: int
 
 
 @sync_to_async
@@ -362,14 +382,23 @@ def get_plan_options(user: NexUser) -> tuple[Subscription | None, list[PlanOptio
 
     days_left = subscription.days_left
     current = subscription.plan
+    # Самый длинный активный срок даёт самую низкую цену месяца — её и
+    # показываем в списке как «от», чтобы не звать по полной цене того, кто
+    # готов заплатить сразу за год.
+    longest_period = BillingPeriod.objects.filter(is_active=True).order_by("-months").first()
     options = []
     for plan in Plan.objects.filter(is_active=True, is_public=True):
         quote = pricing.quote_plan_change(days_left, current.price_month, plan.price_month)
+        min_price_month = (
+            longest_period.price_for(plan) // longest_period.months
+            if longest_period else plan.price_month
+        )
         options.append(
             PlanOption(
                 device_limit=plan.device_limit,
                 name=plan.name,
                 price_month=plan.price_month,
+                min_price_month=min_price_month,
                 is_current=plan.pk == current.pk,
                 is_upgrade=plan.price_month > current.price_month,
                 converted_days=quote.converted_days,
@@ -377,6 +406,27 @@ def get_plan_options(user: NexUser) -> tuple[Subscription | None, list[PlanOptio
             )
         )
     return subscription, options
+
+
+@sync_to_async
+def get_plan_topup_options(user: NexUser, device_limit: int) -> list[PlanTopupOption]:
+    """Сроки оплаты нового тарифа для экрана, где бесплатный переход недоступен."""
+    plan = Plan.objects.get(device_limit=device_limit, is_active=True)
+    subscription = Subscription.objects.select_related("plan").get(user=user)
+    subscription = service.ensure_current_plan(subscription)
+    days_left = subscription.days_left
+    current = subscription.plan
+    return [
+        PlanTopupOption(
+            months=period.months,
+            price=pricing.topup_price_for_period(
+                days_left, current.price_month, plan.price_month,
+                period.months, period.discount_percent,
+            ),
+            days=period.days,
+        )
+        for period in BillingPeriod.objects.filter(is_active=True)
+    ]
 
 
 @sync_to_async
@@ -421,16 +471,30 @@ def start_renew_payment(user: NexUser, months: int, return_url: str) -> str:
 
 
 @sync_to_async
-def start_plan_change_payment(user: NexUser, device_limit: int, return_url: str) -> str:
+def start_plan_change_payment(user: NexUser, device_limit: int, return_url: str, months: int = 1) -> str:
+    """`months` выбирается на экране доплаты — по умолчанию 1, как раньше.
+
+    Цена всегда пересчитывается заново по актуальному остатку, а не берётся из
+    экрана: между показом вариантов и нажатием кнопки могло пройти время.
+    """
     plan = Plan.objects.get(device_limit=device_limit, is_active=True)
-    quote = service.quote_plan_change(user, plan)
-    if quote.topup_price is None:
+    subscription = Subscription.objects.select_related("plan").get(user=user)
+    subscription = service.ensure_current_plan(subscription)
+    period = BillingPeriod.objects.filter(months=months, is_active=True).first()
+    discount_percent = period.discount_percent if period else 0
+    days = period.days if period else pricing.days_in_period()
+    price = pricing.topup_price_for_period(
+        subscription.days_left, subscription.plan.price_month, plan.price_month,
+        months, discount_percent,
+    )
+    if price <= 0:
         raise service.SubscriptionError("Переход бесплатный, платить не нужно")
     created = payments.create_payment(
         user,
         plan,
-        amount=quote.topup_price,
-        days=quote.topup_days,
+        amount=price,
+        days=days,
+        months=months,
         kind=PaymentKindEnum.PLAN_CHANGE,
         return_url=return_url,
     )

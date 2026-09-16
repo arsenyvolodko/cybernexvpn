@@ -23,6 +23,7 @@ from bot.services import (
     change_plan_free,
     device_count,
     get_plan_options,
+    get_plan_topup_options,
     get_renew_options,
     plan_change_is_immediate,
     receipt_needs_email,
@@ -133,29 +134,32 @@ async def handle_plan_details(call: CallbackQuery, callback_data: PlanCallback, 
         await render(call, texts.SOMETHING_WENT_WRONG, keyboards.only_back())
         return
 
+    if option.is_upgrade and option.converted_days < 1:
+        # Округление остатка по курсу нового тарифа дало 0 дней: бесплатный
+        # переход означал бы «нажми и подписка сразу кончится». Такую опцию
+        # не предлагаем вовсе — только доплату, и не за фиксированный месяц,
+        # а на выбранный человеком срок.
+        text = texts.PLAN_UPGRADE_NO_FREE_OPTION.format(
+            plan=texts.plural_devices(option.device_limit),
+            price=option.price_month,
+            current_plan=texts.plural_devices(subscription.plan.device_limit),
+            days_left=texts.plural_days(subscription.days_left),
+        )
+        topup_options = await get_plan_topup_options(user, option.device_limit)
+        await render(call, text, keyboards.plan_change_topup(option.device_limit, topup_options))
+        return
+
     if option.is_upgrade:
-        if option.converted_days < 1:
-            # Округление остатка по курсу нового тарифа дало 0 дней: бесплатный
-            # переход означал бы «нажми и подписка сразу кончится». Такую
-            # опцию не предлагаем вовсе — только доплату за полный период.
-            text = texts.PLAN_UPGRADE_NO_FREE_OPTION.format(
-                plan=texts.plural_devices(option.device_limit),
-                price=option.price_month,
-                days_left=texts.plural_days(subscription.days_left),
-                topup_price=option.topup_price,
-                days=texts.plural_days(30),
+        text = texts.PLAN_UPGRADE.format(
+            plan=texts.plural_devices(option.device_limit),
+            price=option.price_month,
+            days_left=texts.plural_days(subscription.days_left),
+            converted=texts.plural_days(option.converted_days),
+        )
+        if option.topup_price:
+            text += texts.PLAN_UPGRADE_TOPUP.format(
+                price=option.topup_price, days=texts.plural_days(30)
             )
-        else:
-            text = texts.PLAN_UPGRADE.format(
-                plan=texts.plural_devices(option.device_limit),
-                price=option.price_month,
-                days_left=texts.plural_days(subscription.days_left),
-                converted=texts.plural_days(option.converted_days),
-            )
-            if option.topup_price:
-                text += texts.PLAN_UPGRADE_TOPUP.format(
-                    price=option.topup_price, days=texts.plural_days(30)
-                )
     else:
         text = texts.PLAN_DOWNGRADE.format(
             plan=texts.plural_devices(option.device_limit),
@@ -212,14 +216,16 @@ async def handle_plan_pay(
     call: CallbackQuery, callback_data: PlanCallback, user: NexUser, state: FSMContext
 ) -> None:
     await call.answer()
-    if await _needs_email(call, user, state, f"plan:{callback_data.device_limit}"):
+    if await _needs_email(call, user, state, f"plan:{callback_data.device_limit}:{callback_data.months}"):
         return
-    await _start_plan_payment(call, user, callback_data.device_limit)
+    await _start_plan_payment(call, user, callback_data.device_limit, callback_data.months)
 
 
-async def _start_plan_payment(event: CallbackQuery | Message, user: NexUser, device_limit: int) -> None:
+async def _start_plan_payment(
+    event: CallbackQuery | Message, user: NexUser, device_limit: int, months: int = 1
+) -> None:
     try:
-        url = await start_plan_change_payment(user, device_limit, settings.TG_BOT_URL)
+        url = await start_plan_change_payment(user, device_limit, settings.TG_BOT_URL, months)
     except SubscriptionError as exc:
         await render(event, str(exc), keyboards.only_back())
         return
@@ -251,4 +257,5 @@ async def handle_email(message: Message, user: NexUser, state: FSMContext) -> No
     if resume.startswith("renew:"):
         await _start_renew(message, user, int(resume.split(":")[1]))
     elif resume.startswith("plan:"):
-        await _start_plan_payment(message, user, int(resume.split(":")[1]))
+        _, device_limit, months = resume.split(":")
+        await _start_plan_payment(message, user, int(device_limit), int(months))

@@ -57,6 +57,29 @@ def test_topup_price_never_negative():
     assert pricing.topup_price_for_full_period(days_left=999, price_from=PRICE_10, price_to=PRICE_1) == 0
 
 
+def test_topup_price_for_period_matches_single_month_at_zero_discount():
+    """Экран доплаты с несколькими сроками не должен разъехаться со старой формулой."""
+    single = pricing.topup_price_for_full_period(days_left=5, price_from=PRICE_1, price_to=PRICE_3)
+    multi = pricing.topup_price_for_period(
+        days_left=5, price_from=PRICE_1, price_to=PRICE_3, months=1, discount_percent=0
+    )
+    assert single == multi
+
+
+def test_topup_price_for_period_applies_the_discount_to_the_whole_period():
+    # 3 месяца по 400₽ со скидкой 10% = 1080₽, минус кредит от остатка (5 дн. × 150₽ / 30).
+    credit = pricing.value_of_days(5, PRICE_1)
+    assert pricing.topup_price_for_period(
+        days_left=5, price_from=PRICE_1, price_to=PRICE_3, months=3, discount_percent=10
+    ) == 1080 - credit
+
+
+def test_topup_price_for_period_never_negative():
+    assert pricing.topup_price_for_period(
+        days_left=999, price_from=PRICE_10, price_to=PRICE_1, months=12, discount_percent=25
+    ) == 0
+
+
 def test_no_days_left_means_full_price():
     quote = pricing.quote_plan_change(days_left=0, price_from=PRICE_1, price_to=PRICE_3)
     assert quote.converted_days == 0

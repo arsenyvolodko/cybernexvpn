@@ -431,6 +431,19 @@ class GlobalSettings(models.Model):
         max_length=128, default="Изменение тарифа подписки CyberNex: {devices} устр., {days} дн.",
         verbose_name="Позиция чека — смена тарифа",
     )
+
+    # --- реферальная программа ---
+    referral_inviter_days = models.PositiveSmallIntegerField(
+        default=10,
+        verbose_name="Дней инвайтеру",
+        help_text="Начисляется тому, кто позвал, после первой оплаты приглашённого.",
+    )
+    referral_invitee_days = models.PositiveSmallIntegerField(
+        default=10,
+        verbose_name="Дней приглашённому",
+        help_text="Начисляется приглашённому сверх пробного периода, после его первой оплаты.",
+    )
+
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

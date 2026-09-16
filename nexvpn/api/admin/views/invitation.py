@@ -1,4 +1,3 @@
-from django.conf import settings
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
@@ -7,7 +6,7 @@ from rest_framework.response import Response
 
 from nexvpn import permissions
 from nexvpn.api.admin.serializers.invitation_serializers import InvitationRequestSerializer
-from nexvpn.models import NexUser
+from nexvpn.models import GlobalSettings, NexUser
 from nexvpn.subscription import service
 
 
@@ -33,12 +32,13 @@ def apply_invitation(request, *args, **kwargs):
     except service.SubscriptionError as exc:
         return Response({"error_message": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
+    billing = GlobalSettings.load()
     return Response(
         {
             "inviter": inviter.pk,
             "invitee": invitee.pk,
-            "inviter_bonus_days": settings.REFERRAL_INVITER_DAYS,
-            "invitee_bonus_days": settings.REFERRAL_INVITEE_DAYS,
+            "inviter_bonus_days": billing.referral_inviter_days,
+            "invitee_bonus_days": billing.referral_invitee_days,
             "granted": invitation.reward_granted_at is not None,
         }
     )

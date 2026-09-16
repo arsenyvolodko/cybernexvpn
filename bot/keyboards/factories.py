@@ -27,6 +27,7 @@ class RenewCallback(CallbackData, prefix="renew"):
 class PlanCallback(CallbackData, prefix="plan"):
     device_limit: int
     action: str  # open | free | pay
+    months: int = 1  # на сколько месяцев доплата, только для action="pay"
 
 
 class ExpiredCallback(CallbackData, prefix="exp"):

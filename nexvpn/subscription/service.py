@@ -15,6 +15,8 @@ from django.utils.timezone import now
 
 from nexvpn.enums import PanelSyncStatusEnum, SubscriptionEventReasonEnum
 from nexvpn.models import (
+    BillingPeriod,
+    GlobalSettings,
     NexUser,
     Payment,
     Plan,
@@ -214,12 +216,16 @@ def change_plan_now(
     new_plan: Plan,
     amount_paid: int = 0,
     payment: Payment | None = None,
+    months: int = 1,
 ) -> Subscription:
     """Немедленный переход на другой тариф с сохранением стоимости остатка.
 
     Остаток пересчитывается по цене нового тарифа (30 дней по 150₽ → 11 дней
-    по 400₽), и сверху добавляется полный период, если пользователь доплатил.
-    Ни при каком размере остатка деньги не сгорают.
+    по 400₽), и сверху добавляется оплаченный период, если пользователь
+    доплатил. Ни при каком размере остатка деньги не сгорают.
+
+    `months` — на сколько месяцев нового тарифа оплачена доплата (см.
+    `Payment.period_months`). При `amount_paid=0` не используется.
     """
     subscription = Subscription.objects.select_for_update().select_related("plan").filter(user=user).first()
     if subscription is None:
@@ -237,11 +243,16 @@ def change_plan_now(
             raise SubscriptionError(
                 "Доплата при таком остатке невыгодна пользователю — переход должен быть бесплатным"
             )
-        if amount_paid < quote.topup_price:
+        period = BillingPeriod.objects.filter(months=months, is_active=True).first()
+        discount_percent = period.discount_percent if period else 0
+        topup_price = pricing.topup_price_for_period(
+            days_left, old_plan.price_month, new_plan.price_month, months, discount_percent
+        )
+        if amount_paid < topup_price:
             raise SubscriptionError(
-                f"Недостаточная доплата: нужно {quote.topup_price}₽, получено {amount_paid}₽"
+                f"Недостаточная доплата: нужно {topup_price}₽, получено {amount_paid}₽"
             )
-        converted_days = quote.topup_days
+        converted_days = months * pricing.days_in_period()
 
     expires_before = subscription.expires_at
     subscription.plan = new_plan
@@ -422,9 +433,10 @@ def grant_referral_rewards_if_first_payment(invitee: NexUser) -> bool:
     invitation.reward_granted_at = now()
     invitation.save(update_fields=["reward_granted_at"])
 
+    billing = GlobalSettings.load()
     grant_days(
         invitee,
-        days=settings.REFERRAL_INVITEE_DAYS,
+        days=billing.referral_invitee_days,
         reason=SubscriptionEventReasonEnum.REFERRAL_INVITEE,
         comment=f"Первая оплата по приглашению от {invitation.inviter}",
     )
@@ -433,7 +445,7 @@ def grant_referral_rewards_if_first_payment(invitee: NexUser) -> bool:
     inviter_subscription = Subscription.objects.filter(user=inviter).select_related("plan").first()
     grant_days(
         inviter,
-        days=settings.REFERRAL_INVITER_DAYS,
+        days=billing.referral_inviter_days,
         reason=SubscriptionEventReasonEnum.REFERRAL_INVITER,
         # У инвайтера без подписки бонус открывает её на тарифе пробного периода.
         plan=None if inviter_subscription else trial_plan(),

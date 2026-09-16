@@ -113,6 +113,46 @@ def test_far_subscription_is_not_reminded(plan):
 
 
 @override_settings(SUBSCRIPTION_REMINDER_HOURS=OFFSETS)
+def test_short_reminder_survives_a_scheduled_downgrade(monkeypatch, plan):
+    """Регрессия: подписка со сменой тарифа переставала получать короткие напоминания.
+
+    `_reminder_extras` трогает `subscription.next_plan` — но `due_reminders()` отдаёт
+    объекты с `select_related("user", "plan")`, без `next_plan`. Прицельные тесты на
+    `_reminder_extras` сами делали `select_related("next_plan")` перед вызовом и этим
+    маскировали дыру: в реальном пайплайне (`send_due_reminders`, внутри `asyncio.run`
+    в celery-таске) обращение к непрогруженному `next_plan` — синхронный поход в
+    базу из async-контекста, и Django роняет его `SynchronousOnlyOperation`.
+
+    На проде 15.09.2026 это стоило подписке `pk=347` всех напоминаний за 24/12/6/2/1
+    час подряд: долетели только «за 48 часов» (next_plan ещё не трогается) и финальное
+    «подписка закончилась» (идёт отдельной веткой, без `_reminder_extras`).
+    """
+    from asgiref.sync import async_to_sync
+
+    from bot.notifications import send_due_reminders
+    from nexvpn.subscription import service
+
+    small = PlanFactory(device_limit=1, price_month=150)
+    subscription = expiring_in(2, plan)
+    monkeypatch.setattr("bot.notifications.panel_sync.list_devices", lambda *a, **kw: [])
+    service.schedule_plan_downgrade(subscription.user, small)
+
+    class FakeBot:
+        def __init__(self):
+            self.sent = []
+
+        async def send_message(self, chat_id, text, reply_markup=None):
+            self.sent.append(chat_id)
+
+    bot = FakeBot()
+
+    sent, failed = async_to_sync(send_due_reminders)(bot)
+
+    assert (sent, failed) == (1, 0)
+    assert bot.sent == [subscription.user_id]
+
+
+@override_settings(SUBSCRIPTION_REMINDER_HOURS=OFFSETS)
 def test_renewal_resets_reminders(plan):
     """Начался новый период — напоминать по нему надо заново."""
     subscription = expiring_in(1, plan)

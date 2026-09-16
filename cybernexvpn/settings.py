@@ -348,9 +348,9 @@ TRIAL_REMINDER_MAX_HOURS = env.int("TRIAL_REMINDER_MAX_HOURS", 24)
 TRIAL_DAYS = env.int("TRIAL_DAYS", 3)
 TRIAL_PLAN_DEVICES = env.int("TRIAL_PLAN_DEVICES", 3)
 
-# Реферальная программа: обоим начисляется после ПЕРВОЙ оплаты приглашённого.
-REFERRAL_INVITER_DAYS = env.int("REFERRAL_INVITER_DAYS", 10)
-REFERRAL_INVITEE_DAYS = env.int("REFERRAL_INVITEE_DAYS", 10)
+# Реферальная программа (сколько дней начислять обоим после ПЕРВОЙ оплаты
+# приглашённого) правится в админке — GlobalSettings.referral_inviter_days /
+# referral_invitee_days, см. миграцию 0044.
 
 # Миграция старой базы
 LEGACY_CUTOFF_DATE = env.str("LEGACY_CUTOFF_DATE", "2026-08-03")

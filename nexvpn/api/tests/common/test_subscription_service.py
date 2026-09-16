@@ -8,7 +8,7 @@ from django.utils.timezone import now
 from django.conf import settings
 
 from nexvpn.enums import SubscriptionEventReasonEnum
-from nexvpn.models import Plan, Subscription, SubscriptionEvent, UserInvitation
+from nexvpn.models import GlobalSettings, Plan, Subscription, SubscriptionEvent, UserInvitation
 from nexvpn.api.tests.factories import NexUserFactory, PlanFactory, SubscriptionFactory
 from nexvpn.subscription import service
 
@@ -106,6 +106,26 @@ def test_upgrade_rejects_underpayment(plans):
         service.change_plan_now(subscription.user, plans[3], amount_paid=100)
 
 
+def test_upgrade_with_multi_month_topup_uses_the_period_discount(plans):
+    """`months=3` — засеянный `BillingPeriod` со скидкой 10% (см. миграцию 0028)."""
+    subscription = SubscriptionFactory(plan=plans[1], expires_at=now() + timedelta(days=30))
+    # 3 мес. × 400₽ × 0.9 = 1080₽, минус кредит от остатка (30 дн. × 150₽ / 30 = 150₽).
+    price = 1080 - 150
+
+    service.change_plan_now(subscription.user, plans[3], amount_paid=price, months=3)
+
+    subscription.refresh_from_db()
+    assert subscription.plan == plans[3]
+    assert subscription.expires_at == expiry_after(90)
+
+
+def test_upgrade_multi_month_topup_rejects_underpayment(plans):
+    subscription = SubscriptionFactory(plan=plans[1], expires_at=now() + timedelta(days=30))
+
+    with pytest.raises(service.SubscriptionError):
+        service.change_plan_now(subscription.user, plans[3], amount_paid=929, months=3)
+
+
 def test_downgrade_is_deferred_to_next_period(plans):
     """До конца оплаченного периода у человека остаются все его устройства."""
     subscription = SubscriptionFactory(plan=plans[5], expires_at=now() + timedelta(days=20))
@@ -177,6 +197,28 @@ def test_referral_rewards_only_after_first_payment(plans):
     # 30 оплаченных + 10 бонусных поверх остатка
     assert invitee.subscription.expires_at == expiry_after(40, base=invitee_before)
     assert UserInvitation.objects.get(invitee=invitee).reward_granted_at is not None
+
+
+def test_referral_reward_days_are_configurable_independently(plans):
+    """Дни настраиваются в админке (`GlobalSettings`) и разные для двух сторон."""
+    GlobalSettings.load()
+    GlobalSettings.objects.filter(pk=1).update(referral_inviter_days=25, referral_invitee_days=4)
+
+    inviter = NexUserFactory(id=20)
+    invitee = NexUserFactory(id=21)
+    SubscriptionFactory(user=inviter, plan=plans[3], expires_at=now() + timedelta(days=10))
+    SubscriptionFactory(user=invitee, plan=plans[3], expires_at=now() + timedelta(days=3))
+    service.register_invitation(inviter, invitee)
+    inviter_before = inviter.subscription.expires_at
+    invitee_before = invitee.subscription.expires_at
+
+    service.purchase_period(invitee, plans[3], amount=400)
+
+    inviter.subscription.refresh_from_db()
+    invitee.subscription.refresh_from_db()
+    assert inviter.subscription.expires_at == expiry_after(25, base=inviter_before)
+    # 30 оплаченных + 4 бонусных поверх остатка.
+    assert invitee.subscription.expires_at == expiry_after(34, base=invitee_before)
 
 
 def test_referral_rewards_granted_once(plans):

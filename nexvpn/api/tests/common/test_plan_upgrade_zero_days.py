@@ -65,7 +65,7 @@ def labels(call):
 
 def make_option(**overrides):
     defaults = dict(
-        device_limit=10, name="10 устройств", price_month=5000,
+        device_limit=10, name="10 устройств", price_month=5000, min_price_month=5000,
         is_current=False, is_upgrade=True, converted_days=0, topup_price=1200,
     )
     defaults.update(overrides)
@@ -100,7 +100,12 @@ def test_downgrade_free_button_is_never_affected():
 
 
 def test_screen_offers_only_topup_when_conversion_is_zero():
-    """Дорогой тариф, маленький остаток: пересчёт даёт 0 дней."""
+    """Дорогой тариф, маленький остаток: пересчёт даёт 0 дней.
+
+    Вместо одной кнопки «Доплатить и получить месяц» экран теперь предлагает
+    выбрать срок — те же сроки, что и у продления (см. `BillingPeriod`,
+    засеяны миграцией `0028_billing_periods`).
+    """
     cheap = PlanFactory(device_limit=1, price_month=100)
     pricey = PlanFactory(device_limit=10, price_month=5000)
     subscription = SubscriptionFactory(plan=cheap, expires_at=now() + dt.timedelta(hours=20))
@@ -110,10 +115,12 @@ def test_screen_offers_only_topup_when_conversion_is_zero():
         call, PlanCallback(device_limit=pricey.device_limit, action="open"), subscription.user
     )
 
-    assert "перейти бесплатно нельзя" in call.message.text.lower()
+    assert "бесплатно не получится" in call.message.text.lower()
     assert "это 0 дней" not in call.message.text, "не должны предлагать переход на ноль дней"
+    assert "ближайший месяц" in call.message.text.lower()
     assert not any("бесплатно" in label.lower() for label in labels(call))
-    assert any("доплат" in label.lower() for label in labels(call))
+    assert any("1 мес." in label for label in labels(call))
+    assert any("12 мес." in label and "/мес)" in label for label in labels(call))
 
 
 def test_screen_offers_the_free_option_when_conversion_is_real():

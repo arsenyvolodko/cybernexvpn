@@ -59,6 +59,17 @@ def topup_price_for_full_period(days_left: int, price_from: int, price_to: int) 
     return max(0, price_to - value_of_days(days_left, price_from))
 
 
+def topup_price_for_period(
+    days_left: int, price_from: int, price_to: int, months: int, discount_percent: int = 0
+) -> int:
+    """То же самое, но на несколько месяцев вперёд и со скидкой за срок.
+
+    Кредит от старого тарифа (`value_of_days`) списывается один раз, а не на
+    каждый месяц — иначе более длинный срок оказывался бы менее выгодным.
+    """
+    return max(0, period_price(price_to, months, discount_percent) - value_of_days(days_left, price_from))
+
+
 @dataclass(frozen=True)
 class PlanChangeQuote:
     """Расчёт перехода на другой тариф — то, что бот показывает пользователю."""

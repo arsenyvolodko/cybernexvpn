@@ -45,7 +45,7 @@ def due_reminders() -> list[tuple[Subscription, int]]:
     subscriptions = list(
         Subscription.objects
         .filter(expires_at__gt=moment, expires_at__lte=horizon)
-        .select_related("user", "plan")
+        .select_related("user", "plan", "next_plan")
     )
 
     already_sent = {

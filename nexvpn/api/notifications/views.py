@@ -98,6 +98,7 @@ def _apply_payment(payment: Payment):
             new_plan=payment.plan,
             amount_paid=payment.amount or 0,
             payment=payment,
+            months=payment.period_months or 1,
         )
 
     return service.purchase_period(
