@@ -19,7 +19,6 @@ class ButtonsTextStorage(ABC):
     RENEW = "Продлить подписку 💳"
     PAY = "Перейти к оплате 💳"
     CHANGE_PLAN_FREE = "Перейти бесплатно"
-    CHANGE_PLAN_PAY = "Доплатить и получить месяц"
     WEB_VERSION = "Веб-версия 🌐"
 
     # устройства
@@ -56,7 +55,6 @@ class ButtonsStorage(metaclass=AutoNameButtonMeta):
     RENEW = Button(style="success")
     PAY = Button(style="success")
     CHANGE_PLAN_FREE = Button()
-    CHANGE_PLAN_PAY = Button()
     WEB_VERSION = Button()
 
     ADD_DEVICE = Button()

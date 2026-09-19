@@ -201,8 +201,12 @@ class ReferralView:
     history: list[tuple[str, int, str]]  # дата, дни, за кого
     # Текущие ставки программы — из GlobalSettings, правятся в админке без
     # деплоя. Отдаём готовыми, а не читаем настройки повторно в хендлере:
-    # экран всегда должен показывать то же число, что реально начислится.
-    inviter_days: int
+    # экран всегда должен показывать те же числа, что реально начислятся.
+    # Дни инвайтера — вилка, не число: точная сумма известна только в момент
+    # оплаты приглашённого (сравниваются тарифы), заранее показать можно
+    # только границы.
+    inviter_days_min: int
+    inviter_days_max: int
     invitee_days: int
 
 
@@ -284,7 +288,8 @@ def get_referral_view(user: NexUser) -> ReferralView:
             (event.created_at.strftime("%d.%m.%Y"), event.delta_days, event.comment)
             for event in events
         ],
-        inviter_days=billing.referral_inviter_days,
+        inviter_days_min=billing.referral_inviter_days_min,
+        inviter_days_max=billing.referral_inviter_days_max,
         invitee_days=billing.referral_invitee_days,
     )
 
@@ -341,11 +346,19 @@ class PlanOption:
 
 @dataclass
 class PlanTopupOption:
-    """Один вариант доплаты, когда бесплатный переход недоступен."""
+    """Один вариант доплаты за переход — со скидкой за срок, как при продлении."""
 
     months: int
     price: int
     days: int
+    # Каталожная цена месяца на новом тарифе за этот срок — без учёта кредита
+    # от старого тарифа. Показывается в скобках у кнопки и должна совпадать с
+    # тем «от N₽/мес», что человек уже видел на экране выбора тарифа
+    # (`PlanOption.min_price_month` считается так же, для самого длинного
+    # срока). Личный кредит за остаток снижает саму сумму к оплате, но не
+    # должен менять цифру, которой мы рекламируем тариф — иначе один и тот же
+    # тариф на одном и том же сроке выглядел бы по-разному на двух экранах.
+    price_month: int
 
 
 @sync_to_async
@@ -410,7 +423,13 @@ def get_plan_options(user: NexUser) -> tuple[Subscription | None, list[PlanOptio
 
 @sync_to_async
 def get_plan_topup_options(user: NexUser, device_limit: int) -> list[PlanTopupOption]:
-    """Сроки оплаты нового тарифа для экрана, где бесплатный переход недоступен."""
+    """Сроки доплаты за переход на новый тариф — все активные, не только месяц.
+
+    Раньше при доступном бесплатном переходе предлагался единственный срок
+    (месяц), а полный выбор сроков показывался только когда бесплатного
+    перехода не было вовсе. Разницы в желании доплатить и получить больше
+    дней тут нет — сроки те же самые, что и при продлении.
+    """
     plan = Plan.objects.get(device_limit=device_limit, is_active=True)
     subscription = Subscription.objects.select_related("plan").get(user=user)
     subscription = service.ensure_current_plan(subscription)
@@ -424,6 +443,7 @@ def get_plan_topup_options(user: NexUser, device_limit: int) -> list[PlanTopupOp
                 period.months, period.discount_percent,
             ),
             days=period.days,
+            price_month=period.price_for(plan) // period.months,
         )
         for period in BillingPeriod.objects.filter(is_active=True)
     ]

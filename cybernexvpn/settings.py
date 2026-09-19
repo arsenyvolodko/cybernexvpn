@@ -349,8 +349,9 @@ TRIAL_DAYS = env.int("TRIAL_DAYS", 3)
 TRIAL_PLAN_DEVICES = env.int("TRIAL_PLAN_DEVICES", 3)
 
 # Реферальная программа (сколько дней начислять обоим после ПЕРВОЙ оплаты
-# приглашённого) правится в админке — GlobalSettings.referral_inviter_days /
-# referral_invitee_days, см. миграцию 0044.
+# приглашённого) правится в админке — GlobalSettings.referral_inviter_days_min /
+# referral_inviter_days_max (тариф инвайтера дороже/не дороже тарифа,
+# оплаченного приглашённым) / referral_invitee_days, см. миграции 0044, 0045.
 
 # Миграция старой базы
 LEGACY_CUTOFF_DATE = env.str("LEGACY_CUTOFF_DATE", "2026-08-03")

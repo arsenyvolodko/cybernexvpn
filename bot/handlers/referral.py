@@ -24,8 +24,12 @@ async def handle_referral(call: CallbackQuery, user: NexUser) -> None:
 
     text = texts.REFERRAL.format(
         invitee_trial=texts.plural_days(settings.TRIAL_DAYS),
-        inviter_days=texts.plural_days(view.inviter_days),
+        inviter_days_min=texts.plural_days(view.inviter_days_min),
+        inviter_days_max=texts.plural_days(view.inviter_days_max),
+        inviter_days_min_n=view.inviter_days_min,
+        inviter_days_max_n=view.inviter_days_max,
         invitee_days=texts.plural_days(view.invitee_days),
+        invitee_days_n=view.invitee_days,
         link=view.link,
         invited=view.invited,
         pending=view.pending,

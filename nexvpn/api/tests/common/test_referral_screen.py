@@ -1,9 +1,9 @@
 """Экран рефералки показывает актуальные ставки программы.
 
-Дни настраиваются в админке (`GlobalSettings.referral_inviter_days` /
-`referral_invitee_days`, см. миграцию 0044) — экран в боте обязан отражать
-текущее значение из базы, а не то, что было зашито в переменных окружения на
-момент деплоя.
+Дни настраиваются в админке (`GlobalSettings.referral_inviter_days_min` /
+`referral_inviter_days_max` / `referral_invitee_days`, см. миграции 0044 и
+0045) — экран в боте обязан отражать текущее значение из базы. Дни инвайтера
+— вилка (min/max), точная сумма решается только на оплате приглашённого.
 """
 
 import pytest
@@ -57,12 +57,19 @@ def show(user):
 
 
 def test_screen_shows_the_configured_days_and_they_may_differ():
+    """Min — только в фразе «N бесплатных дней» (так в макете владельца).
+    Max и дни приглашённого дополнительно встречаются как отдельное «N дней»/
+    «N дня» — их вставляет `plural_days`, поэтому проверяем оба места."""
     GlobalSettings.load()
-    GlobalSettings.objects.filter(pk=1).update(referral_inviter_days=25, referral_invitee_days=4)
+    GlobalSettings.objects.filter(pk=1).update(
+        referral_inviter_days_min=25, referral_inviter_days_max=40, referral_invitee_days=4
+    )
 
     text = show(NexUserFactory())
 
-    assert "25 дней" in text
+    assert "25 бесплатных дней" in text
+    assert "40 дней" in text
+    assert "40 бесплатных дней" in text
     assert "4 дня" in text
 
 
@@ -71,23 +78,33 @@ def test_screen_reflects_a_change_in_admin_settings():
     user = NexUserFactory()
     GlobalSettings.load()
 
-    GlobalSettings.objects.filter(pk=1).update(referral_inviter_days=10, referral_invitee_days=10)
-    assert "10 дней" in show(user)
-
-    GlobalSettings.objects.filter(pk=1).update(referral_inviter_days=15, referral_invitee_days=5)
+    GlobalSettings.objects.filter(pk=1).update(
+        referral_inviter_days_min=10, referral_inviter_days_max=30, referral_invitee_days=10
+    )
     text = show(user)
-    assert "15 дней" in text
+    assert "10 бесплатных дней" in text
+    assert "30 дней" in text
+
+    GlobalSettings.objects.filter(pk=1).update(
+        referral_inviter_days_min=15, referral_inviter_days_max=45, referral_invitee_days=5
+    )
+    text = show(user)
+    assert "15 бесплатных дней" in text
+    assert "45 дней" in text
     assert "5 дней" in text
 
 
-def test_default_referral_days_match_the_historical_env_default():
-    """Миграция 0044 сама заводит строку настроек — дефолт должен остаться 10/10,
-    как было в убранных `REFERRAL_INVITER_DAYS`/`REFERRAL_INVITEE_DAYS`."""
+def test_default_referral_days_match_the_new_tiered_defaults():
+    """Дефолты новой тарифной схемы: 10 дней инвайтеру, если его тариф дороже,
+    30 — если не дороже; приглашённому по-прежнему 10, как и было исторически."""
     billing = GlobalSettings.load()
 
-    assert billing.referral_inviter_days == 10
+    assert billing.referral_inviter_days_min == 10
+    assert billing.referral_inviter_days_max == 30
     assert billing.referral_invitee_days == 10
-    assert "10 дней" in show(NexUserFactory())
+    text = show(NexUserFactory())
+    assert "10 бесплатных дней" in text
+    assert "30 дней" in text
 
 
 def test_admin_fieldsets_reference_real_fields():

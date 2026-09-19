@@ -72,26 +72,34 @@ def make_option(**overrides):
     return services.PlanOption(**defaults)
 
 
+def make_topup_options(**overrides):
+    """Один срок доплаты (1 месяц) — то, что нужно большинству тестов клавиатуры."""
+    defaults = dict(months=1, price=1200, days=30, price_month=5000)
+    defaults.update(overrides)
+    return [services.PlanTopupOption(**defaults)]
+
+
 # --- клавиатура ---
 
 
 def test_free_button_hidden_when_conversion_rounds_to_zero():
-    keyboard = keyboards.plan_change(make_option(converted_days=0))
+    keyboard = keyboards.plan_change(make_option(converted_days=0), make_topup_options())
 
     assert not any("бесплатно" in b.text.lower() for row in keyboard.inline_keyboard for b in row)
-    assert any("Доплатить" in b.text or "доплат" in b.text.lower()
-               for row in keyboard.inline_keyboard for b in row)
+    assert any("мес." in b.text for row in keyboard.inline_keyboard for b in row)
 
 
 def test_free_button_shown_when_conversion_gives_at_least_a_day():
-    keyboard = keyboards.plan_change(make_option(converted_days=1))
+    keyboard = keyboards.plan_change(make_option(converted_days=1), make_topup_options())
 
     assert any("бесплатно" in b.text.lower() for row in keyboard.inline_keyboard for b in row)
 
 
 def test_downgrade_free_button_is_never_affected():
     """У понижения остаток по курсу не может уйти в 0 — это не тот путь."""
-    keyboard = keyboards.plan_change(make_option(is_upgrade=False, converted_days=90, topup_price=None))
+    keyboard = keyboards.plan_change(
+        make_option(is_upgrade=False, converted_days=90, topup_price=None), []
+    )
 
     assert any("бесплатно" in b.text.lower() for row in keyboard.inline_keyboard for b in row)
 
@@ -135,3 +143,42 @@ def test_screen_offers_the_free_option_when_conversion_is_real():
 
     assert "ничего не доплачивая" in call.message.text
     assert any("бесплатно" in label.lower() for label in labels(call))
+
+
+def test_upgrade_screen_offers_several_periods_when_free_option_also_exists():
+    """Раньше при доступном бесплатном переходе была одна кнопка «Доплатить
+    и получить месяц» — теперь те же сроки, что и у продления (см. описание
+    задачи: «оплата 1 мес», «оплата 3 мес (N₽/мес)» и т.д., а не один месяц)."""
+    cheap = PlanFactory(device_limit=1, price_month=100)
+    modest = PlanFactory(device_limit=3, price_month=150)
+    subscription = SubscriptionFactory(plan=cheap, expires_at=now() + dt.timedelta(days=10))
+
+    call = FakeCall()
+    async_to_sync(handle_plan_details)(
+        call, PlanCallback(device_limit=modest.device_limit, action="open"), subscription.user
+    )
+
+    label_texts = labels(call)
+    assert any("бесплатно" in label.lower() for label in label_texts)
+    assert any(label.startswith("1 мес.") for label in label_texts)
+    assert any(label.startswith("12 мес.") and "/мес)" in label for label in label_texts)
+
+
+def test_upgrade_topup_bracket_price_matches_the_plan_list_reference_price():
+    """Цена месяца в скобках у доплаты обязана совпадать с «от N₽/мес» на
+    экране выбора тарифа — иначе один и тот же тариф на 12 месяцах выглядел бы
+    по-разному на двух соседних экранах."""
+    cheap = PlanFactory(device_limit=1, price_month=100)
+    modest = PlanFactory(device_limit=3, price_month=150)
+    subscription = SubscriptionFactory(plan=cheap, expires_at=now() + dt.timedelta(days=10))
+
+    _, options = async_to_sync(services.get_plan_options)(subscription.user)
+    reference = next(o.min_price_month for o in options if o.device_limit == modest.device_limit)
+
+    call = FakeCall()
+    async_to_sync(handle_plan_details)(
+        call, PlanCallback(device_limit=modest.device_limit, action="open"), subscription.user
+    )
+
+    twelve_month_label = next(label for label in labels(call) if label.startswith("12 мес."))
+    assert f"({reference}₽/мес)" in twelve_month_label

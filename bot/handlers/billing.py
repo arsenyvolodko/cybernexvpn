@@ -149,6 +149,8 @@ async def handle_plan_details(call: CallbackQuery, callback_data: PlanCallback, 
         await render(call, text, keyboards.plan_change_topup(option.device_limit, topup_options))
         return
 
+    topup_options = await get_plan_topup_options(user, option.device_limit)
+
     if option.is_upgrade:
         text = texts.PLAN_UPGRADE.format(
             plan=texts.plural_devices(option.device_limit),
@@ -156,10 +158,8 @@ async def handle_plan_details(call: CallbackQuery, callback_data: PlanCallback, 
             days_left=texts.plural_days(subscription.days_left),
             converted=texts.plural_days(option.converted_days),
         )
-        if option.topup_price:
-            text += texts.PLAN_UPGRADE_TOPUP.format(
-                price=option.topup_price, days=texts.plural_days(30)
-            )
+        if any(o.price > 0 for o in topup_options):
+            text += texts.PLAN_UPGRADE_TOPUP_HINT
     else:
         text = texts.PLAN_DOWNGRADE.format(
             plan=texts.plural_devices(option.device_limit),
@@ -168,7 +168,7 @@ async def handle_plan_details(call: CallbackQuery, callback_data: PlanCallback, 
             current=texts.plural_devices(subscription.plan.device_limit),
         )
 
-    await render(call, text, keyboards.plan_change(option))
+    await render(call, text, keyboards.plan_change(option, topup_options))
 
 
 @router.callback_query(PlanCallback.filter(F.action == "free"))

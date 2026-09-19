@@ -417,9 +417,14 @@ def register_invitation(inviter: NexUser, invitee: NexUser) -> UserInvitation:
 def grant_referral_rewards_if_first_payment(invitee: NexUser) -> bool:
     """Первая оплата приглашённого: бонус обоим.
 
-    Инвайтеру — фиксированные дни на его текущем тарифе, приглашённому — дни на
-    том тарифе, который он только что оплатил. `reward_granted_at` гарантирует,
-    что это случится ровно один раз.
+    Приглашённому — фиксированные дни на том тарифе, который он только что
+    оплатил. Инвайтеру — дни на его текущем тарифе, но их количество
+    тарифное, не фиксированное: `referral_inviter_days_max`, если тариф
+    инвайтера (₽/мес) на этот момент не дороже того, что оплатил
+    приглашённый, иначе `referral_inviter_days_min`. У инвайтера без
+    подписки для сравнения берётся цена тарифа пробного периода — с ним
+    почти любая оплата приглашённого даёт максимум.
+    `reward_granted_at` гарантирует, что это случится ровно один раз.
     """
     invitation = (
         UserInvitation.objects.select_for_update()
@@ -434,7 +439,7 @@ def grant_referral_rewards_if_first_payment(invitee: NexUser) -> bool:
     invitation.save(update_fields=["reward_granted_at"])
 
     billing = GlobalSettings.load()
-    grant_days(
+    invitee_subscription = grant_days(
         invitee,
         days=billing.referral_invitee_days,
         reason=SubscriptionEventReasonEnum.REFERRAL_INVITEE,
@@ -443,12 +448,24 @@ def grant_referral_rewards_if_first_payment(invitee: NexUser) -> bool:
 
     inviter = invitation.inviter
     inviter_subscription = Subscription.objects.filter(user=inviter).select_related("plan").first()
+    inviter_price = (
+        inviter_subscription.plan.price_month if inviter_subscription else trial_plan().price_month
+    )
+    invitee_price = invitee_subscription.plan.price_month
+    inviter_days = (
+        billing.referral_inviter_days_max
+        if inviter_price <= invitee_price
+        else billing.referral_inviter_days_min
+    )
     grant_days(
         inviter,
-        days=billing.referral_inviter_days,
+        days=inviter_days,
         reason=SubscriptionEventReasonEnum.REFERRAL_INVITER,
         # У инвайтера без подписки бонус открывает её на тарифе пробного периода.
         plan=None if inviter_subscription else trial_plan(),
-        comment=f"Первая оплата приглашённого {invitee}",
+        comment=(
+            f"Первая оплата приглашённого {invitee} "
+            f"(тариф {invitee_subscription.plan.name}, {invitee_price}₽/мес)"
+        ),
     )
     return True

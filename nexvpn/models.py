@@ -433,10 +433,24 @@ class GlobalSettings(models.Model):
     )
 
     # --- реферальная программа ---
-    referral_inviter_days = models.PositiveSmallIntegerField(
+    referral_inviter_days_min = models.PositiveSmallIntegerField(
         default=10,
-        verbose_name="Дней инвайтеру",
-        help_text="Начисляется тому, кто позвал, после первой оплаты приглашённого.",
+        verbose_name="Дней инвайтеру — его тариф дороже",
+        help_text=(
+            "Начисляется тому, кто позвал, если на момент первой оплаты "
+            "приглашённого тариф инвайтера дороже (₽/мес) того, что оплатил "
+            "приглашённый."
+        ),
+    )
+    referral_inviter_days_max = models.PositiveSmallIntegerField(
+        default=30,
+        verbose_name="Дней инвайтеру — его тариф не дороже",
+        help_text=(
+            "Начисляется тому, кто позвал, если на момент первой оплаты "
+            "приглашённого тариф инвайтера не дороже (₽/мес) того, что "
+            "оплатил приглашённый — это же значение получает инвайтер, у "
+            "которого своей подписки ещё нет."
+        ),
     )
     referral_invitee_days = models.PositiveSmallIntegerField(
         default=10,

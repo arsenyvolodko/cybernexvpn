@@ -177,9 +177,11 @@ def test_purchase_extends_and_clears_scheduled_downgrade(plans):
 
 
 def test_referral_rewards_only_after_first_payment(plans):
+    """Тариф инвайтера (5, 600₽) дороже того, что купит приглашённый (3, 400₽)
+    — это ветка `referral_inviter_days_min` (дефолт 10)."""
     inviter = NexUserFactory(id=10)
     invitee = NexUserFactory(id=11)
-    SubscriptionFactory(user=inviter, plan=plans[3], expires_at=now() + timedelta(days=10))
+    SubscriptionFactory(user=inviter, plan=plans[5], expires_at=now() + timedelta(days=10))
     SubscriptionFactory(user=invitee, plan=plans[3], expires_at=now() + timedelta(days=3))
 
     service.register_invitation(inviter, invitee)
@@ -199,13 +201,48 @@ def test_referral_rewards_only_after_first_payment(plans):
     assert UserInvitation.objects.get(invitee=invitee).reward_granted_at is not None
 
 
+def test_referral_inviter_gets_max_days_when_his_plan_is_not_pricier(plans):
+    """Тариф инвайтера (3, 400₽) не дороже того, что купит приглашённый
+    (5, 600₽) — ветка `referral_inviter_days_max` (дефолт 30)."""
+    inviter = NexUserFactory(id=17)
+    invitee = NexUserFactory(id=18)
+    SubscriptionFactory(user=inviter, plan=plans[3], expires_at=now() + timedelta(days=10))
+    SubscriptionFactory(user=invitee, plan=plans[5], expires_at=now() + timedelta(days=3))
+    service.register_invitation(inviter, invitee)
+    inviter_before = inviter.subscription.expires_at
+
+    service.purchase_period(invitee, plans[5], amount=600)
+
+    inviter.subscription.refresh_from_db()
+    assert inviter.subscription.expires_at == expiry_after(30, base=inviter_before)
+
+
+def test_referral_inviter_without_subscription_compares_against_trial_plan(plans):
+    """Без своей подписки инвайтер сравнивается по цене тарифа пробного
+    периода — почти любая оплата приглашённого даёт ему максимум и заодно
+    открывает ему подписку."""
+    inviter = NexUserFactory(id=19)
+    invitee = NexUserFactory(id=20)
+    SubscriptionFactory(user=invitee, plan=plans[5], expires_at=now() + timedelta(days=3))
+    service.register_invitation(inviter, invitee)
+
+    service.purchase_period(invitee, plans[5], amount=600)
+
+    subscription = Subscription.objects.get(user=inviter)
+    assert subscription.plan == service.trial_plan()
+    assert subscription.expires_at == expiry_after(30)
+
+
 def test_referral_reward_days_are_configurable_independently(plans):
     """Дни настраиваются в админке (`GlobalSettings`) и разные для двух сторон."""
     GlobalSettings.load()
-    GlobalSettings.objects.filter(pk=1).update(referral_inviter_days=25, referral_invitee_days=4)
+    GlobalSettings.objects.filter(pk=1).update(
+        referral_inviter_days_min=25, referral_inviter_days_max=50, referral_invitee_days=4
+    )
 
     inviter = NexUserFactory(id=20)
     invitee = NexUserFactory(id=21)
+    # Одинаковый тариф у обоих — по правилу «не дороже» это ветка max (50).
     SubscriptionFactory(user=inviter, plan=plans[3], expires_at=now() + timedelta(days=10))
     SubscriptionFactory(user=invitee, plan=plans[3], expires_at=now() + timedelta(days=3))
     service.register_invitation(inviter, invitee)
@@ -216,7 +253,7 @@ def test_referral_reward_days_are_configurable_independently(plans):
 
     inviter.subscription.refresh_from_db()
     invitee.subscription.refresh_from_db()
-    assert inviter.subscription.expires_at == expiry_after(25, base=inviter_before)
+    assert inviter.subscription.expires_at == expiry_after(50, base=inviter_before)
     # 30 оплаченных + 4 бонусных поверх остатка.
     assert invitee.subscription.expires_at == expiry_after(34, base=invitee_before)
 
@@ -224,6 +261,7 @@ def test_referral_reward_days_are_configurable_independently(plans):
 def test_referral_rewards_granted_once(plans):
     inviter = NexUserFactory(id=12)
     invitee = NexUserFactory(id=13)
+    # Одинаковый тариф у обоих — ветка max (дефолт 30).
     SubscriptionFactory(user=inviter, plan=plans[3], expires_at=now() + timedelta(days=10))
     SubscriptionFactory(user=invitee, plan=plans[3], expires_at=now() + timedelta(days=3))
     service.register_invitation(inviter, invitee)
@@ -235,7 +273,7 @@ def test_referral_rewards_granted_once(plans):
 
     inviter.subscription.refresh_from_db()
     # Бонус ровно один, несмотря на две оплаты приглашённого.
-    assert inviter.subscription.expires_at == expiry_after(10, base=inviter_before)
+    assert inviter.subscription.expires_at == expiry_after(30, base=inviter_before)
 
 
 def test_self_referral_rejected(plans):

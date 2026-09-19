@@ -388,12 +388,41 @@ def plan_list(options) -> InlineKeyboardMarkup:
     return _rows(*items, back_to=SUBSCRIPTION)
 
 
-def plan_change(option) -> InlineKeyboardMarkup:
-    """У повышения два honest-варианта, у понижения — один отложенный.
+def _topup_buttons(device_limit: int, options) -> list[InlineKeyboardButton]:
+    """Сроки доплаты за переход — один на каждый активный `BillingPeriod`.
+
+    Цена месяца в скобках — каталожная (`option.price_month`), не сумма к
+    оплате делённая на срок: сумма личная (учитывает кредит от старого
+    тарифа), а скобки должны показывать то же число, что и «от N₽/мес» на
+    экране выбора тарифа, иначе один и тот же тариф выглядел бы по-разному.
+    Срок пропускаем, если для него доплата обнулилась — не предлагать платить
+    там, где кредита от старого тарифа уже хватает с лихвой.
+    """
+    items = []
+    for option in options:
+        if option.price <= 0:
+            continue
+        label = f"{option.months} мес. — {option.price}₽"
+        if option.months > 1:
+            label += f" ({option.price_month}₽/мес)"
+        items.append(
+            InlineKeyboardButton(
+                text=label,
+                callback_data=PlanCallback(
+                    device_limit=device_limit, action="pay", months=option.months
+                ).pack(),
+            )
+        )
+    return items
+
+
+def plan_change(option, topup_options) -> InlineKeyboardMarkup:
+    """У повышения — «перейти бесплатно» (если положено) и доплата на любой срок.
 
     «Перейти бесплатно» не показываем, если остаток по курсу нового тарифа
     округлился до 0 дней: это не бесплатный переход, а способ прямо сейчас
-    обнулить активную подписку. Доплата за полный период при этом остаётся.
+    обнулить активную подписку. Доплата за полный период при этом остаётся —
+    строится тем же списком сроков, что и продление, а не одним месяцем.
     """
     items = []
     if option.converted_days >= 1:
@@ -403,38 +432,13 @@ def plan_change(option) -> InlineKeyboardMarkup:
                 callback_data=PlanCallback(device_limit=option.device_limit, action="free").pack(),
             )
         )
-    if option.topup_price:
-        items.append(
-            InlineKeyboardButton(
-                text=f"{ButtonsStorage.CHANGE_PLAN_PAY.text} — {option.topup_price}₽",
-                callback_data=PlanCallback(device_limit=option.device_limit, action="pay").pack(),
-            )
-        )
+    items.extend(_topup_buttons(option.device_limit, topup_options))
     return _rows(*items, back_to=ButtonsStorage.CHANGE_PLAN.callback)
 
 
 def plan_change_topup(device_limit: int, options) -> InlineKeyboardMarkup:
-    """Сроки доплаты, когда бесплатный переход недоступен (остаток < суток).
-
-    Тот же принцип, что у продления (`_renew_buttons`): цена месяца в скобках
-    у сроков длиннее месяца, иначе выгоду не заметят.
-    """
-    items = []
-    for option in options:
-        if option.price <= 0:
-            continue
-        label = f"{option.months} мес. — {option.price}₽"
-        if option.months > 1:
-            label += f" ({option.price // option.months}₽/мес)"
-        items.append(
-            InlineKeyboardButton(
-                text=label,
-                callback_data=PlanCallback(
-                    device_limit=device_limit, action="pay", months=option.months
-                ).pack(),
-            )
-        )
-    return _rows(*items, back_to=ButtonsStorage.CHANGE_PLAN.callback)
+    """Сроки доплаты, когда бесплатный переход недоступен (остаток < суток)."""
+    return _rows(*_topup_buttons(device_limit, options), back_to=ButtonsStorage.CHANGE_PLAN.callback)
 
 
 def pay(url: str) -> InlineKeyboardMarkup:

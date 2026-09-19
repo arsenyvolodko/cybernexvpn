@@ -37,7 +37,10 @@ def apply_invitation(request, *args, **kwargs):
         {
             "inviter": inviter.pk,
             "invitee": invitee.pk,
-            "inviter_bonus_days": billing.referral_inviter_days,
+            # Точная сумма инвайтеру решится только на первой оплате приглашённого
+            # (сравнение тарифов) — заранее известна только вилка.
+            "inviter_bonus_days_min": billing.referral_inviter_days_min,
+            "inviter_bonus_days_max": billing.referral_inviter_days_max,
             "invitee_bonus_days": billing.referral_invitee_days,
             "granted": invitation.reward_granted_at is not None,
         }
