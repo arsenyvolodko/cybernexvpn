@@ -294,7 +294,7 @@ SUPPORT_CONTACT = env.str("SUPPORT_CONTACT", "@cybernexvpn")
 # участников станет нечем.
 TG_CHANNEL_USERNAME = env.str("TG_CHANNEL_USERNAME", "@cybernexvpn")
 TG_CHANNEL_URL = env.str("TG_CHANNEL_URL", "https://t.me/cybernexvpn")
-# Страница-мостик: Telegram не пускает в inline-кнопки схемы вроде happ://,
+# Страница-мостик: Telegram не пускает в inline-кнопки схемы вроде incy://,
 # поэтому нужна https-страница, которая покажет кнопку с этой схемой.
 # Пусто — ведём на штатную страницу подписки Remnawave.
 CONNECT_BRIDGE_URL = env.str("CONNECT_BRIDGE_URL", "")

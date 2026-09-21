@@ -33,10 +33,9 @@ router = Router(name="connect")
 def build_connect_url(platform: Platform, subscription_url: str) -> str:
     """Ссылка, по которой приложение откроется с уже добавленной подпиской.
 
-    Telegram пускает в inline-кнопки только http(s), поэтому `happ://add/...`
+    Telegram пускает в inline-кнопки только http(s), поэтому `incy://add/...`
     туда не положить — нужна промежуточная страница на своём домене, которая
-    покажет кнопки с этими схемами. Какое приложение у человека, мы не знаем,
-    поэтому страница предлагает и Happ, и INCY.
+    сама откроет приложение по этой схеме.
 
     Пока страница не выкачена, ведём на штатную страницу подписки Remnawave:
     там тоже есть кнопки приложений, просто на одно касание больше.
@@ -44,8 +43,8 @@ def build_connect_url(platform: Platform, subscription_url: str) -> str:
     bridge = settings.CONNECT_BRIDGE_URL
     if not bridge:
         return subscription_url
-    # Платформу передаём, чтобы страница показала нужное приложение первым:
-    # на iPhone это INCY, на Windows Happ вообще единственный вариант.
+    # Платформу страница сейчас не использует (приложение везде одно), но
+    # параметр оставлен: мостик уже выкачен и принимает его.
     return f"{bridge}?sub={quote(subscription_url, safe='')}&platform={platform.value}"
 
 

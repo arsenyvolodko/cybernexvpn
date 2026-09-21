@@ -1,18 +1,15 @@
 """Что скачать и как подключиться на каждой платформе.
 
-Ссылки не выдуманы: магазины взяты из официального `app-config.json` страницы
-подписки Remnawave, десктопные — из релизов Happ на GitHub (проверено, что
-`latest/download/...` отдаёт 200 и переживёт следующий релиз).
+Предлагаем только **INCY** (LLC ITDEV): она есть в российском App Store, в
+Google Play и десктопными сборками — одна программа на всех платформах.
+Happ не предлагаем: его нет в российском App Store, а у старых версий (до 4.0)
+панель отдаёт base64-подписку без профилей «Авто» (они живут только в
+XRAY_JSON). Уже установленный Happ при этом продолжает работать.
 
-**Happ нет в российском App Store** (проверено 10.08.2026 через Apple lookup
-API: `id6504287215` есть в us/de и отсутствует в ru; «Happ Proxy Utility Plus»
-`id6746188973`, на который ссылается конфиг Remnawave, снят вообще отовсюду).
-Поэтому для российского аккаунта — **INCY** (`id6756943388`, LLC ITDEV), она в
-ru-магазине есть. Тот же INCY мы уже видели в HWID-логах панели.
-
-Схемы у обеих программ одинаковой формы — `happ://add/<url>` и `incy://add/<url>`,
-поэтому боту не нужно знать, какую из них человек поставил: развилку показывает
-страница-мостик.
+Ссылки проверены 21.09.2026: магазины — Apple lookup API (`id6756943388`,
+есть в ru и us) и Google Play (`llc.itdev.incy`); десктоп — релизы
+`INCY-DEV/incy-platforms`, `latest/download/...` отдаёт 200 и переживёт
+следующий релиз. Сборки под Windows ARM у INCY нет.
 """
 
 from dataclasses import dataclass
@@ -43,58 +40,45 @@ CATALOG: dict[Platform, PlatformGuide] = {
         title="iPhone / iPad 📱",
         downloads=[
             DownloadLink(
-                "INCY — если App Store российский",
+                "Скачать INCY в App Store",
                 "https://apps.apple.com/ru/app/incy/id6756943388",
             ),
-            DownloadLink(
-                "Happ — если менял регион",
-                "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
-            ),
         ],
-        install_hint=(
-            "Если ты не меня регион в AppStore, то скачай приложение INCY.\n"
-            "Если регион изменен, то приложение Happ.\n"
-        ),
+        install_hint="Поставь INCY из App Store — она есть и в российском магазине.",
     ),
     Platform.ANDROID: PlatformGuide(
         title="Android 🤖",
         downloads=[
             DownloadLink(
-                "Google Play",
-                "https://play.google.com/store/apps/details?id=com.happproxy",
+                "Скачать INCY в Google Play",
+                "https://play.google.com/store/apps/details?id=llc.itdev.incy",
             ),
         ],
-        install_hint="Поставь Happ из Google Play и запусти его.",
+        install_hint="Поставь INCY из Google Play и запусти её.",
     ),
     Platform.MACOS: PlatformGuide(
         title="Mac 💻",
         downloads=[
-            # Первым — .dmg: он не зависит от региона App Store и работает у всех.
             DownloadLink(
-                "Скачать Happ (.dmg)",
-                "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/Happ.macOS.universal.dmg",
+                "Скачать INCY (Apple M1 и новее)",
+                "https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-macos-arm64.dmg",
             ),
             DownloadLink(
-                "Happ в App Store (менял регион)",
-                "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+                "Скачать INCY (Intel)",
+                "https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-macos-intel.dmg",
             ),
         ],
         install_hint=(
-            "Проще всего скачать .dmg и перетащить Happ в «Программы» — этот способ "
-            "не зависит от региона App Store. Если аккаунт не российский, можно "
-            "поставить из магазина."
+            "Скачай .dmg под свой процессор и перетащи INCY в «Программы». "
+            "Какой процессор — смотри в меню Apple → «Об этом Mac»: «Apple M…» или «Intel»."
         ),
     ),
     Platform.WINDOWS: PlatformGuide(
         title="Windows 🖥",
         downloads=[
             DownloadLink(
-                "Скачать (обычный компьютер)",
-                "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
-            ),
-            DownloadLink(
-                "Скачать (процессор ARM)",
-                "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.arm64.exe",
+                "Скачать INCY",
+                "https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-windows-setup.exe",
             ),
         ],
         install_hint=(
@@ -108,6 +92,3 @@ CATALOG: dict[Platform, PlatformGuide] = {
 def get_guide(platform: Platform) -> PlatformGuide:
     return CATALOG[platform]
 
-
-# Схемы приложений. Обе одинаковой формы, страница-мостик показывает обе кнопки.
-URL_SCHEMES = {"happ": "happ://add/", "incy": "incy://add/"}

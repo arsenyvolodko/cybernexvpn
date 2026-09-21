@@ -106,7 +106,7 @@ def test_connect_button_keeps_its_style():
     from bot.keyboards.storage import ButtonsStorage
 
     keyboard = keyboards.platform_connect(
-        Platform.IOS, "https://happ.su/add/abc", "https://sub-nex.com/abc"
+        Platform.IOS, "https://incy.app/add/abc", "https://sub-nex.com/abc"
     )
 
     buttons = [button for row in keyboard.inline_keyboard for button in row]
