@@ -413,3 +413,120 @@ def test_repeat_sends_only_to_those_who_missed_it():
 
     assert [chat for chat, _, _ in second.copied] == [blocked.pk]
     assert fine.pk not in [chat for chat, _, _ in second.copied]
+
+
+# --- опросы ---
+
+
+class PollBot(FakeBot):
+    """Отвечает на send_poll так, как Telegram: сообщением с id опроса."""
+
+    def __init__(self):
+        super().__init__()
+        self.polls = []
+
+    async def send_poll(self, chat_id, question, options, **kwargs):
+        from types import SimpleNamespace
+
+        self.polls.append({"chat_id": chat_id, "question": question, "options": options, **kwargs})
+        self.sent.append(chat_id)
+        return SimpleNamespace(poll=SimpleNamespace(id=f"poll-{chat_id}"))
+
+
+def make_poll(**kwargs):
+    return make_broadcast(
+        text=kwargs.pop("text", "Какой туннель лучше? {emoji_5406756500108501710:🆓}"),
+        poll_options=kwargs.pop("poll_options", "Авто\nРоссия\n\nГермания\n"),
+        **kwargs,
+    )
+
+
+def test_poll_broadcast_goes_out_as_a_non_anonymous_poll():
+    user = NexUserFactory()
+    bot = PollBot()
+
+    run(bot, make_poll(poll_allows_multiple=True))
+
+    poll = bot.polls[0]
+    assert poll["chat_id"] == user.pk
+    assert poll["options"] == ["Авто", "Россия", "Германия"], "пустые строки не варианты"
+    assert poll["is_anonymous"] is False, "иначе не узнаем, кто за что голосовал"
+    assert poll["allows_multiple_answers"] is True
+    assert poll["question"] == (
+        'Какой туннель лучше? <tg-emoji emoji-id="5406756500108501710">🆓</tg-emoji>'
+    )
+    assert BroadcastDelivery.objects.get(user=user).poll_id == f"poll-{user.pk}"
+
+
+def test_vote_is_recorded_changed_and_withdrawn():
+    from nexvpn.models import BroadcastPollVote
+
+    user = NexUserFactory()
+    item = make_poll()
+    run(PollBot(), item)
+    record = async_to_sync(broadcast_module.record_poll_answer)
+
+    assert record(f"poll-{user.pk}", [1]) is True
+    assert BroadcastPollVote.objects.get(broadcast=item, user=user).option_ids == [1]
+
+    record(f"poll-{user.pk}", [0, 2])
+    assert BroadcastPollVote.objects.get(broadcast=item, user=user).option_ids == [0, 2]
+
+    record(f"poll-{user.pk}", [])
+    assert not BroadcastPollVote.objects.filter(broadcast=item).exists()
+
+
+def test_vote_in_unknown_poll_is_ignored():
+    assert async_to_sync(broadcast_module.record_poll_answer)("чужой", [0]) is False
+
+
+def test_bot_subscribes_to_poll_answers():
+    """Бот запрашивает у Telegram только те события, на которые есть обработчики.
+    Без обработчика голоса просто не придут."""
+    from bot.handlers.broadcast import router
+
+    # Собирать весь диспетчер тут нельзя: роутеры прикрепляются к корню
+    # навсегда, и соседний тест, который собирает его сам, упадёт.
+    assert "poll_answer" in router.resolve_used_update_types()
+
+
+@pytest.mark.parametrize(
+    ("fields", "error_field"),
+    [
+        ({"poll_options": "Только один"}, "poll_options"),
+        ({"poll_options": "\n".join(str(i) for i in range(11))}, "poll_options"),
+        ({"poll_options": "Да\nДа"}, "poll_options"),
+        ({"poll_options": "Да\n" + "x" * 101}, "poll_options"),
+        ({"text": "<b>Жирный</b> вопрос"}, "text"),
+        ({"text": "x" * 301}, "text"),
+    ],
+)
+def test_bad_poll_is_rejected_before_sending(fields, error_field):
+    from django.core.exceptions import ValidationError
+
+    item = Broadcast(title="т", text=fields.pop("text", "Вопрос?"), poll_options=fields.pop("poll_options", "А\nБ"))
+    with pytest.raises(ValidationError) as exc:
+        item.clean()
+    assert error_field in exc.value.message_dict
+
+
+def test_good_poll_passes_validation():
+    Broadcast(title="т", text="Вопрос {emoji_1:💖}?", poll_options="А\nБ").clean()
+
+
+def test_admin_shows_who_voted_for_what():
+    from django.contrib.admin.sites import site
+
+    alice = NexUserFactory(username="alice")
+    bob = NexUserFactory(username=None)
+    item = make_poll()
+    run(PollBot(), item)
+    record = async_to_sync(broadcast_module.record_poll_answer)
+    record(f"poll-{alice.pk}", [0])
+    record(f"poll-{bob.pk}", [0, 2])
+
+    html = site._registry[Broadcast].poll_results(item)
+
+    assert "Проголосовало: <b>2</b> из 2" in html
+    assert "@alice" in html and str(bob.pk) in html
+    assert "Германия" in html

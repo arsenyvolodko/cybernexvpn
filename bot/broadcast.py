@@ -20,7 +20,13 @@ from django.conf import settings
 from django.utils.timezone import now
 
 from nexvpn.enums import BroadcastAudienceEnum, BroadcastStatusEnum
-from nexvpn.models import Broadcast, BroadcastDelivery, NexUser, PanelPresence
+from nexvpn.models import (
+    Broadcast,
+    BroadcastDelivery,
+    BroadcastPollVote,
+    NexUser,
+    PanelPresence,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +135,18 @@ async def _deliver(bot, chat_id: int, broadcast: Broadcast, keyboard):
     разметку как есть, без пометки «переслано». Написанное в админке — обычный
     текст.
     """
+    if broadcast.is_poll:
+        # Неанонимный: иначе Telegram не скажет, кто за что голосовал. В
+        # вопросе из разметки работают только эмодзи — это проверяет clean().
+        return await bot.send_poll(
+            chat_id,
+            question=render_text(broadcast.text),
+            options=broadcast.options,
+            is_anonymous=False,
+            allows_multiple_answers=broadcast.poll_allows_multiple,
+            question_parse_mode="HTML",
+            reply_markup=keyboard,
+        )
     if broadcast.is_copied:
         return await bot.copy_message(
             chat_id=chat_id,
@@ -139,25 +157,54 @@ async def _deliver(bot, chat_id: int, broadcast: Broadcast, keyboard):
     return await bot.send_message(chat_id, render_text(broadcast.text), reply_markup=keyboard)
 
 
-async def _send_one(bot, chat_id: int, broadcast: Broadcast, keyboard) -> tuple[bool, str]:
+async def _send_one(bot, chat_id: int, broadcast: Broadcast, keyboard) -> tuple[bool, str, str]:
+    """Отправить одному. Возвращает (дошло, ошибка, id опроса — если это опрос)."""
     try:
-        await _deliver(bot, chat_id, broadcast, keyboard)
-        return True, ""
+        message = await _deliver(bot, chat_id, broadcast, keyboard)
+        return True, "", _poll_id(message)
     except TelegramRetryAfter as exc:
         # Просят подождать — ждём и пробуем ещё раз, это штатная ситуация.
         await asyncio.sleep(exc.retry_after + 1)
         try:
-            await _deliver(bot, chat_id, broadcast, keyboard)
-            return True, ""
+            message = await _deliver(bot, chat_id, broadcast, keyboard)
+            return True, "", _poll_id(message)
         except TelegramAPIError as retry_exc:
-            return False, str(retry_exc)[:250]
+            return False, str(retry_exc)[:250], ""
     except TelegramForbiddenError:
-        return False, "бот заблокирован"
+        return False, "бот заблокирован", ""
     except TelegramAPIError as exc:
-        return False, str(exc)[:250]
+        return False, str(exc)[:250], ""
     except Exception as exc:  # сеть, таймаут — не повод ронять всю рассылку
         logger.warning("Не удалось отправить %s: %s", chat_id, exc)
-        return False, str(exc)[:250]
+        return False, str(exc)[:250], ""
+
+
+def _poll_id(message) -> str:
+    poll = getattr(message, "poll", None)
+    return getattr(poll, "id", "") or ""
+
+
+@sync_to_async
+def record_poll_answer(poll_id: str, option_ids: list[int]) -> bool:
+    """Голос из Telegram. False — опрос не наш (или рассылка уже удалена).
+
+    Пустой `option_ids` — человек отозвал голос. Кто голосовал, берём из
+    доставки: этот экземпляр опроса уходил ровно одному человеку.
+    """
+    delivery = BroadcastDelivery.objects.filter(poll_id=poll_id).exclude(poll_id="").first()
+    if delivery is None:
+        return False
+    if not option_ids:
+        BroadcastPollVote.objects.filter(
+            broadcast_id=delivery.broadcast_id, user_id=delivery.user_id
+        ).delete()
+        return True
+    BroadcastPollVote.objects.update_or_create(
+        broadcast_id=delivery.broadcast_id,
+        user_id=delivery.user_id,
+        defaults={"option_ids": list(option_ids)},
+    )
+    return True
 
 
 async def run(bot, broadcast_id: int) -> dict:
@@ -172,11 +219,11 @@ async def run(bot, broadcast_id: int) -> dict:
 
     for user in targets:
         keyboard = shared_keyboard or keyboard_for(broadcast, user.pk)
-        delivered, error = await _send_one(bot, user.pk, broadcast, keyboard)
+        delivered, error, poll_id = await _send_one(bot, user.pk, broadcast, keyboard)
         await sync_to_async(BroadcastDelivery.objects.update_or_create)(
             broadcast=broadcast,
             user=user,
-            defaults={"is_delivered": delivered, "error": error},
+            defaults={"is_delivered": delivered, "error": error, "poll_id": poll_id},
         )
         if delivered:
             sent += 1

@@ -2,6 +2,7 @@ import logging
 
 from django.contrib import admin, messages
 from django.shortcuts import render
+from django.utils.html import format_html, format_html_join
 
 from nexvpn.enums import BroadcastStatusEnum, PanelSyncStatusEnum
 from nexvpn.subscription import panel_sync
@@ -449,7 +450,9 @@ class InboundUsageDayAdmin(admin.ModelAdmin):
 class BroadcastAdmin(admin.ModelAdmin):
     list_display = ("title", "audience", "status", "recipients_count", "sent_count", "failed_count", "created_at")
     list_filter = ("status", "audience")
-    readonly_fields = ("status", "sent_count", "failed_count", "created_at", "started_at", "finished_at")
+    readonly_fields = (
+        "status", "sent_count", "failed_count", "created_at", "started_at", "finished_at", "poll_results",
+    )
     actions = ("action_send_to_admin", "action_send")
     fieldsets = (
         (None, {
@@ -460,12 +463,54 @@ class BroadcastAdmin(admin.ModelAdmin):
                 "который увидят, если анимированный не отрисуется (без него — ⭐)."
             ),
         }),
+        ("Опрос", {
+            "fields": ("poll_options", "poll_allows_multiple", "poll_results"),
+            "description": (
+                "Оставь варианты пустыми — уйдёт обычное сообщение. В вопросе опроса "
+                "из разметки работают только анимированные эмодзи."
+            ),
+        }),
         ("Кому и как", {"fields": (
             "audience", "with_connect_button", "with_menu_button", "with_referral_buttons", "test_only",
         )}),
         ("Результат", {"fields": ("status", "sent_count", "failed_count",
                                   "created_at", "started_at", "finished_at")}),
     )
+
+    def get_readonly_fields(self, request, obj=None):
+        """Разосланный опрос не правим: номера голосов привязаны к порядку вариантов."""
+        fields = super().get_readonly_fields(request, obj)
+        if obj is not None and obj.is_poll and obj.deliveries.filter(is_delivered=True).exists():
+            fields = (*fields, "poll_options", "poll_allows_multiple", "text")
+        return fields
+
+    @admin.display(description="Результаты")
+    def poll_results(self, obj):
+        if obj is None or not obj.pk or not obj.is_poll:
+            return "—"
+        options = obj.options
+        votes = list(obj.poll_votes.select_related("user").order_by("updated_at"))
+        voters = {index: [] for index in range(len(options))}
+        for vote in votes:
+            name = f"@{vote.user.username}" if vote.user.username else str(vote.user_id)
+            for index in vote.option_ids:
+                voters.setdefault(index, []).append(name)
+        total = len(votes)
+        rows = format_html_join(
+            "",
+            "<tr><td>{}</td><td style='text-align:right'>{}</td><td>{}</td></tr>",
+            (
+                (options[i] if i < len(options) else f"вариант {i}", len(names), ", ".join(names) or "—")
+                for i, names in sorted(voters.items())
+            ),
+        )
+        return format_html(
+            "<p>Проголосовало: <b>{}</b> из {} получивших</p>"
+            "<table><tr><th>Вариант</th><th>Голосов</th><th>Кто</th></tr>{}</table>",
+            total,
+            obj.deliveries.filter(is_delivered=True).count(),
+            rows,
+        )
 
     @admin.display(description="Получателей сейчас")
     def recipients_count(self, obj):

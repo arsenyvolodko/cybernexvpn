@@ -799,6 +799,22 @@ class Broadcast(models.Model):
     # то же, что автор видел в предпросмотре.
     source_chat_id = models.BigIntegerField(null=True, blank=True, default=None)
     source_message_id = models.BigIntegerField(null=True, blank=True, default=None)
+    # Опрос. Заполнены варианты — рассылка уходит неанонимным опросом, `text`
+    # становится вопросом. Каждому свой экземпляр: другие получатели не видят
+    # ни чужих голосов, ни общего распределения, а мы видим всё поимённо.
+    poll_options = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="Варианты ответа",
+        help_text=(
+            "Заполнено — рассылка уходит опросом, текст выше становится вопросом. "
+            "Каждый вариант с новой строки, от 2 до 10. Кто за что голосовал — видно здесь, "
+            "другим пользователям — нет"
+        ),
+    )
+    poll_allows_multiple = models.BooleanField(
+        default=False, verbose_name="Можно выбрать несколько вариантов"
+    )
     sent_count = models.PositiveIntegerField(default=0)
     failed_count = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -809,6 +825,57 @@ class Broadcast(models.Model):
     def is_copied(self) -> bool:
         """Рассылка-копия: текст берётся не из `text`, а из исходного сообщения."""
         return self.source_chat_id is not None and self.source_message_id is not None
+
+    # Лимиты Telegram для опроса.
+    POLL_QUESTION_MAX = 300
+    POLL_OPTION_MAX = 100
+    POLL_OPTIONS_MIN, POLL_OPTIONS_MAX = 2, 10
+
+    @property
+    def options(self) -> list[str]:
+        return [line.strip() for line in self.poll_options.splitlines() if line.strip()]
+
+    @property
+    def is_poll(self) -> bool:
+        return bool(self.options)
+
+    def clean(self):
+        """Опрос проверяем здесь, а не на отправке: иначе ошибка всплывёт
+        только в журнале доставок, по разу на каждого получателя."""
+        import re
+
+        from django.core.exceptions import ValidationError
+
+        if not self.is_poll:
+            return
+        if self.is_copied:
+            raise ValidationError("Рассылку, составленную в боте, нельзя сделать опросом")
+        options = self.options
+        if not self.POLL_OPTIONS_MIN <= len(options) <= self.POLL_OPTIONS_MAX:
+            raise ValidationError({"poll_options": (
+                f"Вариантов должно быть от {self.POLL_OPTIONS_MIN} до {self.POLL_OPTIONS_MAX}, "
+                f"сейчас {len(options)}"
+            )})
+        too_long = [o for o in options if len(o) > self.POLL_OPTION_MAX]
+        if too_long:
+            raise ValidationError({"poll_options": (
+                f"Вариант длиннее {self.POLL_OPTION_MAX} символов: «{too_long[0][:40]}…»"
+            )})
+        if len(set(options)) != len(options):
+            raise ValidationError({"poll_options": "Варианты повторяются"})
+        # В вопросе опроса Telegram понимает из разметки только эмодзи.
+        if re.search(r"<(?!/?tg-emoji\b)", self.text):
+            raise ValidationError({"text": (
+                "В вопросе опроса нельзя разметку (<b>, <i>, ссылки) — только анимированные эмодзи"
+            )})
+        question = re.sub(r"\{emoji_\d+(?::([^{}\s]+))?\}", lambda m: m.group(1) or "⭐", self.text)
+        question = re.sub(r"<[^>]+>", "", question).strip()
+        if not question:
+            raise ValidationError({"text": "Для опроса нужен вопрос"})
+        if len(question) > self.POLL_QUESTION_MAX:
+            raise ValidationError({"text": (
+                f"Вопрос опроса длиннее {self.POLL_QUESTION_MAX} символов ({len(question)})"
+            )})
 
     class Meta:
         verbose_name = "рассылка"
@@ -831,6 +898,9 @@ class BroadcastDelivery(models.Model):
     user = models.ForeignKey(NexUser, on_delete=models.CASCADE)
     is_delivered = models.BooleanField()
     error = models.CharField(max_length=255, blank=True, default="")
+    # У рассылки-опроса: id экземпляра опроса у этого человека. По нему голос
+    # из Telegram находит, к какой рассылке он относится.
+    poll_id = models.CharField(max_length=64, blank=True, default="", db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -842,3 +912,26 @@ class BroadcastDelivery(models.Model):
 
     def __str__(self):
         return f"{self.user_id}: {'доставлено' if self.is_delivered else self.error}"
+
+
+class BroadcastPollVote(models.Model):
+    """Ответ человека на опрос из рассылки.
+
+    Одна строка на человека: перевыбрал — перезаписываем, отозвал голос —
+    удаляем. Номера вариантов — как в `Broadcast.options`, с нуля.
+    """
+
+    broadcast = models.ForeignKey(Broadcast, on_delete=models.CASCADE, related_name="poll_votes")
+    user = models.ForeignKey(NexUser, on_delete=models.CASCADE)
+    option_ids = models.JSONField(default=list)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "голос в опросе"
+        verbose_name_plural = "Голоса в опросах"
+        constraints = [
+            models.UniqueConstraint(fields=["broadcast", "user"], name="unique_broadcast_poll_vote")
+        ]
+
+    def __str__(self):
+        return f"{self.user_id}: {self.option_ids}"

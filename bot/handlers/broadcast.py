@@ -10,10 +10,15 @@
 import logging
 
 from aiogram import F, Router
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, PollAnswer
 
 from bot import texts
-from bot.broadcast import CONNECT_CALLBACK, MENU_CALLBACK, MENU_KEEP_REFERRAL_CALLBACK
+from bot.broadcast import (
+    CONNECT_CALLBACK,
+    MENU_CALLBACK,
+    MENU_KEEP_REFERRAL_CALLBACK,
+    record_poll_answer,
+)
 from bot.notify import PAYMENT_OK_CALLBACK
 from bot.handlers.connect import connect_screen
 from bot.keyboards import keyboards
@@ -103,3 +108,10 @@ async def handle_connect_ok(call: CallbackQuery) -> None:
     """
     await call.answer()
     await _reply_with_screen(call, texts.MAIN_MENU, keyboards.main_menu())
+
+
+@router.poll_answer()
+async def handle_poll_answer(answer: PollAnswer) -> None:
+    """Голос в опросе из рассылки. Приходит, только если опрос неанонимный."""
+    if not await record_poll_answer(answer.poll_id, answer.option_ids):
+        logger.info("Голос в незнакомом опросе %s", answer.poll_id)
