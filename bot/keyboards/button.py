@@ -15,12 +15,20 @@ class Button:
     "primary" (синяя). Без него клиент рисует кнопку своим обычным цветом.
     Старые версии Telegram поле просто игнорируют, так что подстраховка не
     нужна: кнопка останется обычной, но рабочей.
+
+    `icon` — id кастомного (анимированного) эмодзи, поле Bot API
+    `icon_custom_emoji_id`. Клиент рисует его слева от текста. Поэтому у
+    кнопки с иконкой обычного эмодзи в тексте быть не должно — иначе на новых
+    клиентах их будет два. Старые клиенты иконку не покажут, останется текст.
     """
 
-    def __init__(self, text: str | None = None, style: str | None = None) -> None:
+    def __init__(
+        self, text: str | None = None, style: str | None = None, icon: str | None = None
+    ) -> None:
         self.name: str | None = None
         self.txt: str | None = text
         self.style: str | None = style
+        self.icon: str | None = icon
         self.callback_suffix: str = "_callback"
 
     def __str__(self) -> str:
@@ -44,11 +52,14 @@ class Button:
         """
         text = kwargs.get("text", self.txt)
         style = kwargs.get("style", self.style)
+        icon = kwargs.get("icon", self.icon)
         url = kwargs.get("url")
         if url:
-            return InlineKeyboardButton(text=text, url=url, style=style)
+            return InlineKeyboardButton(text=text, url=url, style=style, icon_custom_emoji_id=icon)
         callback_data = kwargs.get("callback_data", self.callback)
-        return InlineKeyboardButton(text=text, callback_data=callback_data, style=style)
+        return InlineKeyboardButton(
+            text=text, callback_data=callback_data, style=style, icon_custom_emoji_id=icon
+        )
 
 
 class AutoNameButtonMeta(type):

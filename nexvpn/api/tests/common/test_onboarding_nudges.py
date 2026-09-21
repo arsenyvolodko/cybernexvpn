@@ -132,7 +132,7 @@ def test_the_button_leads_forward():
     bot, _, _ = run()
 
     labels = [b.text for row in bot.sent[0]["keyboard"].inline_keyboard for b in row]
-    assert labels == ["Подключиться ⚡"], "одна кнопка вперёд, «Назад» тут некуда"
+    assert labels == ["Подключиться"], "одна кнопка вперёд, «Назад» тут некуда"
 
 
 def test_same_step_is_not_repeated():

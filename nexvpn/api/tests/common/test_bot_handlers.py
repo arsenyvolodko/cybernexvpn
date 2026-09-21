@@ -115,6 +115,22 @@ def test_connect_button_keeps_its_style():
     assert connect.url, "это кнопка-ссылка, она должна вести в приложение"
 
 
+def test_main_menu_buttons_carry_animated_icons():
+    """Иконка — отдельное поле кнопки, его легко потерять по дороге в Telegram.
+    Проверяем то, что реально уходит в клавиатуре главного меню."""
+    from bot.keyboards import keyboards
+
+    buttons = [button for row in keyboards.main_menu().inline_keyboard for button in row]
+    icons = {button.text: button.icon_custom_emoji_id for button in buttons}
+
+    assert icons == {
+        "Подключиться": "5411590687663608498",
+        "Моя подписка": "5278573677900752088",
+        "Реферальная программа": "5203996991054432397",
+        "FAQ и поддержка": "5443038326535759644",
+    }
+
+
 def test_the_screen_text_names_the_button_that_exists():
     """Текст просит «нажми ...» — имя должно совпадать с кнопкой на экране."""
     from bot import texts

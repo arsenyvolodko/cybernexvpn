@@ -7,13 +7,14 @@ class ButtonsTextStorage(ABC):
     MAIN_MENU = "В меню"
     BACK = "Назад"
 
-    # главное меню
-    MY_SUBSCRIPTION = "Моя подписка 🔑"
-    REFERRAL = "Реферальная программа 🎁"
-    FAQ_SUPPORT = "FAQ и поддержка 💬"
+    # главное меню. Эмодзи у этих кнопок — анимированные иконки (`icon` в
+    # ButtonsStorage), поэтому в самом тексте их нет.
+    MY_SUBSCRIPTION = "Моя подписка"
+    REFERRAL = "Реферальная программа"
+    FAQ_SUPPORT = "FAQ и поддержка"
 
     # подключение: и первая кнопка меню, и кнопка внутри подписки — один сценарий
-    CONNECT = "Подключиться ⚡"
+    CONNECT = "Подключиться"
     MY_DEVICES = "Мои устройства 📱"
     CHANGE_PLAN = "Сменить тариф 🔄"
     RENEW = "Продлить подписку 💳"
@@ -43,12 +44,13 @@ class ButtonsStorage(metaclass=AutoNameButtonMeta):
     MAIN_MENU = Button()
     BACK = Button()
 
-    MY_SUBSCRIPTION = Button()
-    REFERRAL = Button()
-    FAQ_SUPPORT = Button()
+    # Иконки — кастомные анимированные эмодзи владельца (21.09.2026).
+    MY_SUBSCRIPTION = Button(icon="5278573677900752088")  # ключик
+    REFERRAL = Button(icon="5203996991054432397")  # подарок
+    FAQ_SUPPORT = Button(icon="5443038326535759644")
 
     # Зелёная: главное действие бота, ради него сюда и приходят.
-    CONNECT = Button(style="success")
+    CONNECT = Button(style="success", icon="5411590687663608498")  # молния
     MY_DEVICES = Button()
     CHANGE_PLAN = Button()
     # Оплата и продление — тоже деньги в кассу, их тоже выделяем.
