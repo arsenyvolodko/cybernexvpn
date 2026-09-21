@@ -80,6 +80,8 @@ def recipients(broadcast: Broadcast) -> list[NexUser]:
         # первом же заходе. Практически это те, кого мы перенесли, а они о
         # перезапуске так и не узнали.
         users = users.filter(activated_at=None)
+    elif broadcast.audience == BroadcastAudienceEnum.SPECIFIC:
+        users = users.filter(pk__in=broadcast.target_user_ids)
     elif broadcast.audience == BroadcastAudienceEnum.NOT_CONNECTED:
         # Зашёл, подписку получил, но туннель не поднял ни разу.
         #

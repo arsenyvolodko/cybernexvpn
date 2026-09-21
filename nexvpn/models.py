@@ -766,6 +766,15 @@ class Broadcast(models.Model):
         choices=BroadcastAudienceEnum.choices,
         default=BroadcastAudienceEnum.ALL,
     )
+    user_ids = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="id получателей",
+        help_text=(
+            "Для аудитории «Конкретные пользователи»: Telegram id через пробел, "
+            "запятую или с новой строки"
+        ),
+    )
     with_connect_button = models.BooleanField(
         default=False,
         verbose_name="Кнопка «Подключиться бесплатно»",
@@ -860,9 +869,56 @@ class Broadcast(models.Model):
     def is_poll(self) -> bool:
         return bool(self.options)
 
+    @property
+    def target_user_ids(self) -> list[int]:
+        """id из поля «id получателей», без повторов, в порядке ввода.
+        Мусор сюда не попадает — его отсекает clean()."""
+        import re
+
+        seen: dict[int, None] = {}
+        for token in re.split(r"[\s,;]+", self.user_ids.strip()):
+            if token.isdigit():
+                seen.setdefault(int(token), None)
+        return list(seen)
+
     def clean(self):
-        """Опрос проверяем здесь, а не на отправке: иначе ошибка всплывёт
-        только в журнале доставок, по разу на каждого получателя."""
+        """Проверяем здесь, а не на отправке: иначе ошибка всплывёт только в
+        журнале доставок — или, хуже, рассылка уйдёт не тем."""
+        self._clean_audience()
+        self._clean_poll()
+
+    def _clean_audience(self):
+        import re
+
+        from django.core.exceptions import ValidationError
+
+        tokens = [t for t in re.split(r"[\s,;]+", self.user_ids.strip()) if t]
+        if self.audience != BroadcastAudienceEnum.SPECIFIC:
+            if tokens:
+                # Вписал id, но забыл сменить аудиторию — ушло бы всем.
+                raise ValidationError({"audience": (
+                    "Заполнены id получателей — выбери аудиторию «Конкретные пользователи» "
+                    "или очисти поле id"
+                )})
+            return
+        bad = [t for t in tokens if not t.isdigit()]
+        if bad:
+            raise ValidationError({"user_ids": (
+                f"Это не id: {', '.join(bad[:5])}. Нужны числа — Telegram id пользователей"
+            )})
+        ids = self.target_user_ids
+        if not ids:
+            raise ValidationError({"user_ids": "Впиши хотя бы один id"})
+        known = set(NexUser.objects.filter(pk__in=ids).values_list("pk", flat=True))
+        unknown = [str(i) for i in ids if i not in known]
+        if unknown:
+            raise ValidationError({"user_ids": (
+                f"Таких пользователей нет в базе: {', '.join(unknown[:10])}"
+                + (f" и ещё {len(unknown) - 10}" if len(unknown) > 10 else "")
+            )})
+
+    def _clean_poll(self):
+        """Опрос: лимиты Telegram и разметка в вопросе."""
         import re
 
         from django.core.exceptions import ValidationError

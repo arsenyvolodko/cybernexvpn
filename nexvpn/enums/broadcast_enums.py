@@ -21,6 +21,7 @@ class BroadcastAudienceEnum(models.TextChoices):
     NEW = "new", "Пришли уже в новую версию"
     NOT_ACTIVATED = "not_activated", "Не заходили в бота после обновления"
     NOT_CONNECTED = "not_connected", "Зашли, но ни разу не подключились"
+    SPECIFIC = "specific", "Конкретные пользователи (по id)"
 
 
 class BroadcastStatusEnum(models.TextChoices):

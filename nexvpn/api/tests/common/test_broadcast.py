@@ -724,3 +724,68 @@ def test_admin_shows_custom_answers():
     html = site._registry[Broadcast].poll_results(item)
 
     assert "Свои варианты" in html and "Нет Японии" in html and "ответил" in html
+
+
+# --- конкретные пользователи по id ---
+
+
+def test_specific_audience_goes_only_to_listed_ids():
+    a, b, _other = NexUserFactory(), NexUserFactory(), NexUserFactory()
+    item = make_broadcast(
+        audience=BroadcastAudienceEnum.SPECIFIC,
+        user_ids=f"{b.pk}, {a.pk}\n{a.pk};  {b.pk}",
+    )
+
+    assert item.target_user_ids == [b.pk, a.pk], "повторы убраны, порядок ввода сохранён"
+    assert sorted(u.pk for u in broadcast_module.recipients(item)) == sorted([a.pk, b.pk])
+
+
+def test_specific_audience_still_skips_those_who_already_got_it():
+    a, b = NexUserFactory(), NexUserFactory()
+    item = make_broadcast(audience=BroadcastAudienceEnum.SPECIFIC, user_ids=f"{a.pk} {b.pk}")
+    BroadcastDelivery.objects.create(broadcast=item, user=a, is_delivered=True)
+
+    assert [u.pk for u in broadcast_module.recipients(item)] == [b.pk]
+
+
+def test_test_only_ignores_the_list_and_goes_to_admin(settings):
+    admin, listed = NexUserFactory(), NexUserFactory()
+    settings.TG_ADMIN_USER_ID = admin.pk
+    item = make_broadcast(
+        audience=BroadcastAudienceEnum.SPECIFIC, user_ids=str(listed.pk), test_only=True
+    )
+
+    assert [u.pk for u in broadcast_module.recipients(item)] == [admin.pk]
+
+
+def test_specific_audience_sends_to_them():
+    a, other = NexUserFactory(), NexUserFactory()
+    bot = FakeBot()
+    run(bot, make_broadcast(audience=BroadcastAudienceEnum.SPECIFIC, user_ids=str(a.pk)))
+
+    assert bot.sent == [a.pk]
+
+
+@pytest.mark.parametrize(
+    ("audience", "user_ids", "error_field"),
+    [
+        ("specific", "", "user_ids"),
+        ("specific", "123 @vasya", "user_ids"),
+        ("specific", "999000111", "user_ids"),
+        ("all", "123", "audience"),
+    ],
+)
+def test_bad_recipient_list_is_rejected(audience, user_ids, error_field):
+    from django.core.exceptions import ValidationError
+
+    NexUserFactory(id=123)
+    item = Broadcast(title="т", text="т", audience=audience, user_ids=user_ids)
+    with pytest.raises(ValidationError) as exc:
+        item.clean()
+    assert error_field in exc.value.message_dict
+
+
+def test_good_recipient_list_passes():
+    NexUserFactory(id=321)
+    NexUserFactory(id=654)
+    Broadcast(title="т", text="т", audience="specific", user_ids=" 321,\n654 ").clean()

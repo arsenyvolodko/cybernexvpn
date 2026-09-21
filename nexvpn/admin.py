@@ -471,7 +471,8 @@ class BroadcastAdmin(admin.ModelAdmin):
             ),
         }),
         ("Кому и как", {"fields": (
-            "audience", "with_connect_button", "with_menu_button", "with_referral_buttons", "test_only",
+            "audience", "user_ids", "with_connect_button", "with_menu_button", "with_referral_buttons",
+            "test_only",
         )}),
         ("Результат", {"fields": ("status", "sent_count", "failed_count",
                                   "created_at", "started_at", "finished_at")}),
