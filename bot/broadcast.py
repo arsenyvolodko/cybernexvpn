@@ -13,6 +13,7 @@
 import asyncio
 import logging
 import re
+from dataclasses import dataclass
 
 from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError, TelegramRetryAfter
 from asgiref.sync import sync_to_async
@@ -184,27 +185,107 @@ def _poll_id(message) -> str:
     return getattr(poll, "id", "") or ""
 
 
+@dataclass
+class PollAnswerResult:
+    known: bool  # опрос наш
+    ask_custom: bool = False  # только что выбрали «Свой вариант» — надо попросить текст
+    user_id: int | None = None
+    broadcast_id: int | None = None
+
+
 @sync_to_async
-def record_poll_answer(poll_id: str, option_ids: list[int]) -> bool:
-    """Голос из Telegram. False — опрос не наш (или рассылка уже удалена).
+def record_poll_answer(poll_id: str, option_ids: list[int]) -> PollAnswerResult:
+    """Голос из Telegram.
 
     Пустой `option_ids` — человек отозвал голос. Кто голосовал, берём из
     доставки: этот экземпляр опроса уходил ровно одному человеку.
     """
-    delivery = BroadcastDelivery.objects.filter(poll_id=poll_id).exclude(poll_id="").first()
-    if delivery is None:
-        return False
-    if not option_ids:
-        BroadcastPollVote.objects.filter(
-            broadcast_id=delivery.broadcast_id, user_id=delivery.user_id
-        ).delete()
-        return True
-    BroadcastPollVote.objects.update_or_create(
-        broadcast_id=delivery.broadcast_id,
-        user_id=delivery.user_id,
-        defaults={"option_ids": list(option_ids)},
+    delivery = (
+        BroadcastDelivery.objects.filter(poll_id=poll_id)
+        .exclude(poll_id="")
+        .select_related("broadcast")
+        .first()
     )
-    return True
+    if delivery is None:
+        return PollAnswerResult(known=False)
+    result = PollAnswerResult(known=True, user_id=delivery.user_id, broadcast_id=delivery.broadcast_id)
+    vote = BroadcastPollVote.objects.filter(
+        broadcast_id=delivery.broadcast_id, user_id=delivery.user_id
+    ).first()
+
+    if not option_ids:
+        if vote is not None and vote.custom_status != BroadcastPollVote.CUSTOM_ANSWERED:
+            vote.delete()
+        elif vote is not None:
+            # Текст «своего варианта» уже у нас — голос сняли, ответ оставляем.
+            vote.option_ids = []
+            vote.save(update_fields=["option_ids", "updated_at"])
+        return result
+
+    custom_id = delivery.broadcast.custom_option_id
+    picked_custom = custom_id is not None and custom_id in option_ids
+    if vote is None:
+        vote = BroadcastPollVote(broadcast_id=delivery.broadcast_id, user_id=delivery.user_id)
+    was_custom = custom_id is not None and custom_id in (vote.option_ids or [])
+    vote.option_ids = list(option_ids)
+
+    if picked_custom and not was_custom and vote.custom_status != BroadcastPollVote.CUSTOM_ANSWERED:
+        vote.custom_status = BroadcastPollVote.CUSTOM_AWAITING
+        result.ask_custom = True
+    elif not picked_custom and vote.custom_status == BroadcastPollVote.CUSTOM_AWAITING:
+        # Передумал до того, как написал, — ловить его следующее сообщение незачем.
+        vote.custom_status = ""
+    vote.save()
+    return result
+
+
+@sync_to_async
+def awaiting_custom_answer(user_id: int) -> BroadcastPollVote | None:
+    """Ждём ли от человека «свой вариант». Если опросов несколько — последний."""
+    return (
+        BroadcastPollVote.objects.filter(
+            user_id=user_id, custom_status=BroadcastPollVote.CUSTOM_AWAITING
+        )
+        .select_related("broadcast")
+        .order_by("-updated_at")
+        .first()
+    )
+
+
+@sync_to_async
+def save_custom_answer(vote_id: int, text: str) -> None:
+    BroadcastPollVote.objects.filter(pk=vote_id).update(
+        custom_status=BroadcastPollVote.CUSTOM_ANSWERED, custom_text=text, updated_at=now()
+    )
+
+
+@sync_to_async
+def decline_custom_answer(user_id: int, broadcast_id: int) -> bool:
+    """False — отказываться уже не от чего: человек успел ответить или передумал."""
+    return bool(BroadcastPollVote.objects.filter(
+        user_id=user_id, broadcast_id=broadcast_id, custom_status=BroadcastPollVote.CUSTOM_AWAITING
+    ).update(custom_status=BroadcastPollVote.CUSTOM_DECLINED, updated_at=now()))
+
+
+def custom_prompt_keyboard(broadcast_id: int):
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    from bot import texts
+    from bot.keyboards.factories import PollCustomCallback
+
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+        text=texts.POLL_CUSTOM_DECLINE_BUTTON,
+        callback_data=PollCustomCallback(broadcast_id=broadcast_id).pack(),
+    )]])
+
+
+def menu_keyboard():
+    """«В меню», которая снимает клавиатуру и присылает меню новым сообщением."""
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text=MENU_BUTTON_TEXT, callback_data=MENU_CALLBACK)
+    ]])
 
 
 async def run(bot, broadcast_id: int) -> dict:

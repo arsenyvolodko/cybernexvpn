@@ -815,6 +815,15 @@ class Broadcast(models.Model):
     poll_allows_multiple = models.BooleanField(
         default=False, verbose_name="Можно выбрать несколько вариантов"
     )
+    poll_with_custom = models.BooleanField(
+        default=False,
+        verbose_name="Свой вариант",
+        help_text=(
+            "Последним добавится вариант «Свой вариант». Кто его выберет, получит просьбу "
+            "написать ответ; следующее сообщение человека придёт тебе в личку от бота, "
+            "ответить можно реплаем, как в поддержке"
+        ),
+    )
     sent_count = models.PositiveIntegerField(default=0)
     failed_count = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -830,10 +839,22 @@ class Broadcast(models.Model):
     POLL_QUESTION_MAX = 300
     POLL_OPTION_MAX = 100
     POLL_OPTIONS_MIN, POLL_OPTIONS_MAX = 2, 10
+    POLL_CUSTOM_OPTION = "Свой вариант"
 
     @property
     def options(self) -> list[str]:
-        return [line.strip() for line in self.poll_options.splitlines() if line.strip()]
+        """Варианты в том порядке, в каком они уходят в Telegram.
+
+        «Свой вариант» — всегда последним, его номер = `custom_option_id`.
+        """
+        options = [line.strip() for line in self.poll_options.splitlines() if line.strip()]
+        if options and self.poll_with_custom:
+            options.append(self.POLL_CUSTOM_OPTION)
+        return options
+
+    @property
+    def custom_option_id(self) -> int | None:
+        return len(self.options) - 1 if self.is_poll and self.poll_with_custom else None
 
     @property
     def is_poll(self) -> bool:
@@ -921,9 +942,22 @@ class BroadcastPollVote(models.Model):
     удаляем. Номера вариантов — как в `Broadcast.options`, с нуля.
     """
 
+    # «Свой вариант»: ждём от человека текст, получили или он отказался.
+    CUSTOM_AWAITING = "awaiting"
+    CUSTOM_ANSWERED = "answered"
+    CUSTOM_DECLINED = "declined"
+    CUSTOM_STATUSES = (
+        ("", "—"),
+        (CUSTOM_AWAITING, "ждём ответ"),
+        (CUSTOM_ANSWERED, "ответил"),
+        (CUSTOM_DECLINED, "отказался"),
+    )
+
     broadcast = models.ForeignKey(Broadcast, on_delete=models.CASCADE, related_name="poll_votes")
     user = models.ForeignKey(NexUser, on_delete=models.CASCADE)
     option_ids = models.JSONField(default=list)
+    custom_status = models.CharField(max_length=15, choices=CUSTOM_STATUSES, blank=True, default="")
+    custom_text = models.TextField(blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

@@ -65,3 +65,9 @@ class BroadcastCallback(CallbackData, prefix="bc"):
 
     broadcast_id: int
     action: str  # send | drop
+
+
+class PollCustomCallback(CallbackData, prefix="pcust"):
+    """«Не буду отвечать» под просьбой написать свой вариант в опросе."""
+
+    broadcast_id: int

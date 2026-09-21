@@ -466,7 +466,7 @@ def test_vote_is_recorded_changed_and_withdrawn():
     run(PollBot(), item)
     record = async_to_sync(broadcast_module.record_poll_answer)
 
-    assert record(f"poll-{user.pk}", [1]) is True
+    assert record(f"poll-{user.pk}", [1]).known
     assert BroadcastPollVote.objects.get(broadcast=item, user=user).option_ids == [1]
 
     record(f"poll-{user.pk}", [0, 2])
@@ -477,7 +477,7 @@ def test_vote_is_recorded_changed_and_withdrawn():
 
 
 def test_vote_in_unknown_poll_is_ignored():
-    assert async_to_sync(broadcast_module.record_poll_answer)("чужой", [0]) is False
+    assert not async_to_sync(broadcast_module.record_poll_answer)("чужой", [0]).known
 
 
 def test_bot_subscribes_to_poll_answers():
@@ -530,3 +530,197 @@ def test_admin_shows_who_voted_for_what():
     assert "Проголосовало: <b>2</b> из 2" in html
     assert "@alice" in html and str(bob.pk) in html
     assert "Германия" in html
+
+
+# --- «Свой вариант» ---
+
+
+class FakeMessage2:
+    """Сообщение от человека боту: что ответили и что сняли."""
+
+    def __init__(self, user_id, text="", username="vasya", reply_to=None):
+        from types import SimpleNamespace
+
+        self.from_user = SimpleNamespace(
+            id=user_id, username=username, full_name="Вася <Пупкин>"
+        )
+        self.text = text
+        self.caption = None
+        self.reply_to_message = reply_to
+        self.answers = []
+        self.admin_messages = []
+        self.edited_to = "не трогали"
+        message = self
+
+        class _Bot:
+            async def send_message(self, chat_id, text, reply_markup=None):
+                message.admin_messages.append((chat_id, text))
+
+        self.bot = _Bot()
+
+    async def answer(self, text, reply_markup=None):
+        self.answers.append((text, reply_markup))
+
+    async def edit_reply_markup(self, reply_markup=None):
+        self.edited_to = reply_markup
+
+
+def custom_poll(user):
+    item = make_poll(poll_with_custom=True)  # Авто, Россия, Германия, Свой вариант
+    run(PollBot(), item)
+    return item
+
+
+def test_custom_option_goes_last_and_counts_toward_the_limit():
+    from django.core.exceptions import ValidationError
+
+    item = Broadcast(title="т", text="Вопрос?", poll_options="А\nБ", poll_with_custom=True)
+    assert item.options == ["А", "Б", "Свой вариант"]
+    assert item.custom_option_id == 2
+    item.clean()
+
+    nine = "\n".join(f"в{i}" for i in range(9))
+    Broadcast(title="т", text="?", poll_options=nine, poll_with_custom=True).clean()
+    with pytest.raises(ValidationError):
+        Broadcast(title="т", text="?", poll_options=nine + "\nв9", poll_with_custom=True).clean()
+
+
+def test_picking_custom_asks_once_and_changing_mind_stops_waiting():
+    from nexvpn.models import BroadcastPollVote
+
+    user = NexUserFactory()
+    item = custom_poll(user)
+    record = async_to_sync(broadcast_module.record_poll_answer)
+    poll_id = f"poll-{user.pk}"
+
+    first = record(poll_id, [0, 3])
+    assert first.ask_custom and first.user_id == user.pk and first.broadcast_id == item.pk
+    assert BroadcastPollVote.objects.get(user=user).custom_status == "awaiting"
+
+    assert not record(poll_id, [3]).ask_custom, "уже просили — второй раз не просим"
+
+    record(poll_id, [1])
+    assert BroadcastPollVote.objects.get(user=user).custom_status == ""
+
+
+def test_poll_answer_handler_sends_the_prompt_with_decline_button():
+    from types import SimpleNamespace
+
+    from bot import texts
+    from bot.handlers.broadcast import handle_poll_answer
+    from bot.keyboards.factories import PollCustomCallback
+
+    user = NexUserFactory()
+    item = custom_poll(user)
+    sent = []
+
+    class Bot:
+        async def send_message(self, chat_id, text, reply_markup=None):
+            sent.append((chat_id, text, reply_markup))
+
+    answer = SimpleNamespace(poll_id=f"poll-{user.pk}", option_ids=[3])
+    async_to_sync(handle_poll_answer)(answer, Bot())
+
+    chat_id, text, keyboard = sent[0]
+    assert chat_id == user.pk and text == texts.POLL_CUSTOM_PROMPT
+    assert "@arseny_volodko" in text
+    button = keyboard.inline_keyboard[0][0]
+    assert button.text == "Не буду отвечать"
+    assert PollCustomCallback.unpack(button.callback_data).broadcast_id == item.pk
+
+
+def test_next_message_is_forwarded_to_admin_and_thanked(settings):
+    from bot import texts
+    from bot.handlers.broadcast import _pending_custom_answer, handle_custom_answer
+    from nexvpn.models import BroadcastPollVote
+
+    settings.TG_ADMIN_USER_ID = 999
+    user = NexUserFactory()
+    custom_poll(user)
+    async_to_sync(broadcast_module.record_poll_answer)(f"poll-{user.pk}", [3])
+
+    message = FakeMessage2(user.pk, text="Дорого <и> медленно")
+    matched = async_to_sync(_pending_custom_answer)(message)
+    assert matched, "ждём ответ — сообщение должно попасть сюда"
+    async_to_sync(handle_custom_answer)(message, matched["pending_vote"])
+
+    vote = BroadcastPollVote.objects.get(user=user)
+    assert vote.custom_status == "answered" and vote.custom_text == "Дорого <и> медленно"
+    admin_id, admin_text = message.admin_messages[0]
+    assert admin_id == 999
+    assert f"id: <code>{user.pk}</code>" in admin_text, "иначе реплай не дойдёт до человека"
+    assert "Дорого &lt;и&gt; медленно" in admin_text and "Вася &lt;Пупкин&gt;" in admin_text
+    thanks, keyboard = message.answers[0]
+    assert thanks == texts.POLL_CUSTOM_THANKS
+    assert keyboard.inline_keyboard[0][0].callback_data == broadcast_module.MENU_CALLBACK
+
+    # Ответил — больше не ловим его сообщения.
+    assert not async_to_sync(_pending_custom_answer)(FakeMessage2(user.pk, text="ещё"))
+
+
+def test_what_is_not_a_custom_answer(settings):
+    from types import SimpleNamespace
+
+    from bot.handlers.broadcast import _pending_custom_answer
+
+    settings.TG_ADMIN_USER_ID = 0
+    stranger = NexUserFactory()
+    user = NexUserFactory()
+    custom_poll(user)
+    async_to_sync(broadcast_module.record_poll_answer)(f"poll-{user.pk}", [3])
+    check = async_to_sync(_pending_custom_answer)
+
+    assert not check(FakeMessage2(stranger.pk, text="привет")), "от него ответа не ждём"
+    assert not check(FakeMessage2(user.pk, text="/start")), "команда — не ответ"
+
+    settings.TG_ADMIN_USER_ID = user.pk
+    reply = FakeMessage2(user.pk, text="ответ на обращение", reply_to=SimpleNamespace(text="id: 1"))
+    assert not check(reply), "реплай администратора несёт поддержка"
+
+
+def test_decline_removes_button_and_thanks_once():
+    from bot import texts
+    from bot.handlers.broadcast import handle_custom_decline
+    from bot.keyboards.factories import PollCustomCallback
+    from nexvpn.models import BroadcastPollVote
+
+    user = NexUserFactory()
+    item = custom_poll(user)
+    async_to_sync(broadcast_module.record_poll_answer)(f"poll-{user.pk}", [3])
+
+    class Call:
+        def __init__(self):
+            from types import SimpleNamespace
+
+            self.from_user = SimpleNamespace(id=user.pk)
+            self.message = FakeMessage2(user.pk)
+
+        async def answer(self, *args, **kwargs):
+            pass
+
+    call = Call()
+    async_to_sync(handle_custom_decline)(call, PollCustomCallback(broadcast_id=item.pk))
+
+    assert call.message.edited_to is None, "кнопку «Не буду отвечать» сняли"
+    assert BroadcastPollVote.objects.get(user=user).custom_status == "declined"
+    text, keyboard = call.message.answers[0]
+    assert text == texts.POLL_CUSTOM_DECLINED and "@arseny_volodko" in text
+    assert keyboard.inline_keyboard[0][0].callback_data == broadcast_module.MENU_CALLBACK
+
+    again = Call()
+    async_to_sync(handle_custom_decline)(again, PollCustomCallback(broadcast_id=item.pk))
+    assert again.message.answers == [], "второй раз не благодарим"
+
+
+def test_admin_shows_custom_answers():
+    from django.contrib.admin.sites import site
+
+    user = NexUserFactory(username="petya")
+    item = custom_poll(user)
+    async_to_sync(broadcast_module.record_poll_answer)(f"poll-{user.pk}", [3])
+    vote = item.poll_votes.get()
+    async_to_sync(broadcast_module.save_custom_answer)(vote.pk, "Нет Японии")
+
+    html = site._registry[Broadcast].poll_results(item)
+
+    assert "Свои варианты" in html and "Нет Японии" in html and "ответил" in html

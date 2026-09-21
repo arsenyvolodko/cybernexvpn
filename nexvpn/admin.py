@@ -464,7 +464,7 @@ class BroadcastAdmin(admin.ModelAdmin):
             ),
         }),
         ("Опрос", {
-            "fields": ("poll_options", "poll_allows_multiple", "poll_results"),
+            "fields": ("poll_options", "poll_allows_multiple", "poll_with_custom", "poll_results"),
             "description": (
                 "Оставь варианты пустыми — уйдёт обычное сообщение. В вопросе опроса "
                 "из разметки работают только анимированные эмодзи."
@@ -481,7 +481,7 @@ class BroadcastAdmin(admin.ModelAdmin):
         """Разосланный опрос не правим: номера голосов привязаны к порядку вариантов."""
         fields = super().get_readonly_fields(request, obj)
         if obj is not None and obj.is_poll and obj.deliveries.filter(is_delivered=True).exists():
-            fields = (*fields, "poll_options", "poll_allows_multiple", "text")
+            fields = (*fields, "poll_options", "poll_allows_multiple", "poll_with_custom", "text")
         return fields
 
     @admin.display(description="Результаты")
@@ -504,12 +504,33 @@ class BroadcastAdmin(admin.ModelAdmin):
                 for i, names in sorted(voters.items())
             ),
         )
-        return format_html(
+        summary = format_html(
             "<p>Проголосовало: <b>{}</b> из {} получивших</p>"
             "<table><tr><th>Вариант</th><th>Голосов</th><th>Кто</th></tr>{}</table>",
             total,
             obj.deliveries.filter(is_delivered=True).count(),
             rows,
+        )
+        if obj.custom_option_id is None:
+            return summary
+        custom = [vote for vote in votes if vote.custom_status]
+        custom_rows = format_html_join(
+            "",
+            "<tr><td>{}</td><td>{}</td><td>{}</td></tr>",
+            (
+                (
+                    f"@{vote.user.username}" if vote.user.username else str(vote.user_id),
+                    vote.get_custom_status_display(),
+                    vote.custom_text or "—",
+                )
+                for vote in custom
+            ),
+        )
+        return format_html(
+            "{}<p style='margin-top:12px'><b>Свои варианты</b></p>"
+            "<table><tr><th>Кто</th><th>Статус</th><th>Ответ</th></tr>{}</table>",
+            summary,
+            custom_rows or format_html("<tr><td colspan='3'>пока нет</td></tr>"),
         )
 
     @admin.display(description="Получателей сейчас")

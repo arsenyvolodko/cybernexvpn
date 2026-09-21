@@ -23,6 +23,9 @@ def build_router() -> Router:
     # Служебное — раньше всего: команда админа не должна конкурировать
     # с обычными сценариями.
     root.include_router(admin.router)
+    # Сразу за служебным: ответ «своим вариантом» в опросе не должен
+    # перехватить никакой другой сценарий.
+    root.include_router(broadcast.custom_answer_router)
     root.include_router(menu.router)
     root.include_router(subscription.router)
     root.include_router(connect.router)

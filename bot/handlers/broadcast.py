@@ -7,18 +7,27 @@
 отдельным сообщением.
 """
 
+import html
 import logging
 
-from aiogram import F, Router
-from aiogram.types import CallbackQuery, InlineKeyboardMarkup, PollAnswer
+from aiogram import Bot, F, Router
+from aiogram.filters import StateFilter
+from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message, PollAnswer
+from django.conf import settings
 
 from bot import texts
 from bot.broadcast import (
     CONNECT_CALLBACK,
     MENU_CALLBACK,
     MENU_KEEP_REFERRAL_CALLBACK,
+    awaiting_custom_answer,
+    custom_prompt_keyboard,
+    decline_custom_answer,
+    menu_keyboard,
     record_poll_answer,
+    save_custom_answer,
 )
+from bot.keyboards.factories import PollCustomCallback
 from bot.notify import PAYMENT_OK_CALLBACK
 from bot.handlers.connect import connect_screen
 from bot.keyboards import keyboards
@@ -111,7 +120,91 @@ async def handle_connect_ok(call: CallbackQuery) -> None:
 
 
 @router.poll_answer()
-async def handle_poll_answer(answer: PollAnswer) -> None:
+async def handle_poll_answer(answer: PollAnswer, bot: Bot) -> None:
     """Голос в опросе из рассылки. Приходит, только если опрос неанонимный."""
-    if not await record_poll_answer(answer.poll_id, answer.option_ids):
+    result = await record_poll_answer(answer.poll_id, answer.option_ids)
+    if not result.known:
         logger.info("Голос в незнакомом опросе %s", answer.poll_id)
+        return
+    if result.ask_custom:
+        try:
+            await bot.send_message(
+                result.user_id,
+                texts.POLL_CUSTOM_PROMPT,
+                reply_markup=custom_prompt_keyboard(result.broadcast_id),
+            )
+        except Exception:
+            logger.warning("Не удалось попросить свой вариант у %s", result.user_id, exc_info=True)
+
+
+@router.callback_query(PollCustomCallback.filter())
+async def handle_custom_decline(call: CallbackQuery, callback_data: PollCustomCallback) -> None:
+    """«Не буду отвечать»: снимаем кнопку и благодарим."""
+    await call.answer()
+    message = call.message
+    if message is not None:
+        try:
+            await message.edit_reply_markup(reply_markup=None)
+        except Exception:
+            logger.debug("Не удалось снять кнопку с просьбы о своём варианте", exc_info=True)
+    declined = await decline_custom_answer(call.from_user.id, callback_data.broadcast_id)
+    # Не от чего отказываться — ответ уже прислан. Благодарить второй раз незачем.
+    if declined and message is not None:
+        await message.answer(texts.POLL_CUSTOM_DECLINED, reply_markup=menu_keyboard())
+
+
+# --- ответ «своим вариантом» ---
+#
+# Отдельный роутер, подключается в самом начале: следующее сообщение человека
+# после просьбы — это его ответ, и ни один другой сценарий не должен его
+# перехватить. Кроме тех, в которых человек сам сейчас что-то вводит
+# (поддержка, email): там у него есть состояние, и сюда он не попадёт.
+
+custom_answer_router = Router(name="poll_custom_answer")
+
+MAX_CUSTOM_ANSWER = 3000
+
+
+async def _pending_custom_answer(message: Message) -> dict | bool:
+    """Фильтр: ждём ли от автора «свой вариант».
+
+    Пользователя берём из сообщения, а не из UserMiddleware: middleware в боте
+    внутренние и выполняются уже после фильтров.
+    """
+    if message.from_user is None or (message.text or "").startswith("/"):
+        return False
+    if message.from_user.id == settings.TG_ADMIN_USER_ID and message.reply_to_message:
+        # Реплай администратора — это ответ на обращение, его несёт support.
+        return False
+    vote = await awaiting_custom_answer(message.from_user.id)
+    return {"pending_vote": vote} if vote is not None else False
+
+
+@custom_answer_router.message(StateFilter(None), _pending_custom_answer)
+async def handle_custom_answer(message: Message, pending_vote) -> None:
+    text = (message.text or message.caption or "").strip()
+    if not text:
+        await message.answer(texts.POLL_CUSTOM_EMPTY)
+        return
+    await save_custom_answer(pending_vote.pk, text[:MAX_CUSTOM_ANSWER])
+
+    sender = message.from_user
+    if settings.TG_ADMIN_USER_ID:
+        try:
+            await message.bot.send_message(
+                settings.TG_ADMIN_USER_ID,
+                texts.POLL_CUSTOM_TO_ADMIN.format(
+                    title=html.escape(pending_vote.broadcast.title),
+                    name=html.escape(sender.full_name),
+                    username=f" (@{sender.username})" if sender.username else "",
+                    user_id=sender.id,
+                    text=html.escape(text[:MAX_CUSTOM_ANSWER]),
+                ),
+            )
+        except Exception:
+            # Ответ всё равно сохранён — он виден в результатах опроса в админке.
+            logger.exception("Не удалось переслать свой вариант от %s", sender.id)
+    else:
+        logger.error("Свой вариант некуда переслать: не задан TG_ADMIN_USER_ID")
+
+    await message.answer(texts.POLL_CUSTOM_THANKS, reply_markup=menu_keyboard())
