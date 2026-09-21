@@ -111,7 +111,7 @@ def test_home_is_the_same_message_the_person_received(expired_subscription):
     call = step("home", expired_subscription)
 
     assert call.message.text == texts.SUBSCRIPTION_ENDED
-    assert labels(call) == ["Продлить подписку 💳", "Сменить тариф 🔄"]
+    assert labels(call) == ["Продлить подписку", "Сменить тариф 🔄"]
     # Проверяем не подписи, а куда ведут: подписи были верными и тогда, когда
     # кнопки уходили в общий сценарий.
     assert callbacks(call) == [
@@ -160,7 +160,7 @@ def test_after_the_change_there_is_exactly_one_button(expired_subscription):
 
     call = step("pick", expired_subscription, device_limit=cheaper.device_limit)
 
-    assert labels(call) == ["Продлить подписку 💳"], "ни «назад», ни «сменить ещё раз»"
+    assert labels(call) == ["Продлить подписку"], "ни «назад», ни «сменить ещё раз»"
     assert callbacks(call) == [ExpiredCallback(step="renew_final").pack()]
 
 

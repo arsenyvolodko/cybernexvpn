@@ -141,6 +141,31 @@ def test_share_referral_button_carries_its_icon():
     assert share.url == "https://t.me/share/url?url=https://t.me/bot?start=1"
 
 
+def test_copy_referral_button_copies_the_link():
+    from bot.keyboards import keyboards
+
+    copy = keyboards.referral("https://t.me/bot?start=1").inline_keyboard[1][0]
+    assert copy.text == "Скопировать ссылку"
+    assert copy.icon_custom_emoji_id == "5413422358071372326"
+    assert copy.copy_text.text == "https://t.me/bot?start=1"
+
+
+def test_renew_button_carries_its_icon_wherever_it_appears():
+    """«Продлить» живёт на нескольких экранах — иконка должна доехать на каждом."""
+    from bot.keyboards import keyboards
+    from bot.keyboards.storage import ButtonsStorage
+
+    button = ButtonsStorage.RENEW.get_button()
+    assert button.text == "Продлить подписку"
+    assert button.icon_custom_emoji_id == "5267300544094948794"
+    assert button.style == "success"
+
+    # В напоминании кнопка собирается через общий список — проверяем и там.
+    reminder = keyboards.reminder()
+    renew = next(b for row in reminder.inline_keyboard for b in row if b.text == "Продлить подписку")
+    assert renew.icon_custom_emoji_id == "5267300544094948794"
+
+
 def test_the_screen_text_names_the_button_that_exists():
     """Текст просит «нажми ...» — имя должно совпадать с кнопкой на экране."""
     from bot import texts

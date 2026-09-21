@@ -266,6 +266,11 @@ def delete_device(user: NexUser, token: str) -> bool:
     return False
 
 
+def referral_link(user_id: int) -> str:
+    """Реферальная ссылка человека. Одна на экран рефералки и на рассылки."""
+    return f"{settings.TG_BOT_URL}?start={user_id}"
+
+
 @sync_to_async
 def get_referral_view(user: NexUser) -> ReferralView:
     invitations = list(
@@ -279,7 +284,7 @@ def get_referral_view(user: NexUser) -> ReferralView:
 
     billing = GlobalSettings.load()
     return ReferralView(
-        link=f"{settings.TG_BOT_URL}?start={user.pk}",
+        link=referral_link(user.pk),
         invited=len(invitations),
         pending=len(invitations) - len(rewarded),
         rewarded=len(rewarded),

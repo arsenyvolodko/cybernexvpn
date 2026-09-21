@@ -321,13 +321,20 @@ def platform_connect(platform: Platform, connect_url: str, subscription_url: str
 # --- прочее ---
 
 
-def referral(link: str) -> InlineKeyboardMarkup:
-    """«Поделиться» открывает выбор чата прямо в Telegram."""
-    return _rows(
-        # Через get_button, а не вручную: так до Telegram доезжает иконка.
+def referral_buttons(link: str) -> list[InlineKeyboardButton]:
+    """«Поделиться» и «Скопировать» — для экрана рефералки и для рассылок.
+
+    Через get_button, а не вручную: так до Telegram доезжает иконка.
+    «Поделиться» открывает выбор чата прямо в Telegram.
+    """
+    return [
         ButtonsStorage.SHARE_REFERRAL.get_button(url=f"https://t.me/share/url?url={link}"),
-        back_to=MENU,
-    )
+        ButtonsStorage.COPY_REFERRAL.get_button(copy_text=link),
+    ]
+
+
+def referral(link: str) -> InlineKeyboardMarkup:
+    return _rows(*referral_buttons(link), back_to=MENU)
 
 
 def faq(topics) -> InlineKeyboardMarkup:

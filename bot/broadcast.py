@@ -29,6 +29,9 @@ DELAY_BETWEEN_MESSAGES = 0.05
 
 CONNECT_CALLBACK = "bcast_connect"
 MENU_CALLBACK = "bcast_menu"
+# «В меню» у рассылки с кнопками рефералки. Отдельный callback, чтобы не менять
+# поведение обычной: та снимает всю клавиатуру, эта — только саму себя.
+MENU_KEEP_REFERRAL_CALLBACK = "bcast_menu_ref"
 CONNECT_BUTTON_TEXT = "Подключиться бесплатно ⚡"
 MENU_BUTTON_TEXT = "В меню"
 
@@ -73,23 +76,34 @@ def recipients(broadcast: Broadcast) -> list[NexUser]:
     return list(users.exclude(pk__in=already).order_by("pk"))
 
 
-def keyboard_for(broadcast: Broadcast):
+def keyboard_for(broadcast: Broadcast, user_id: int | None = None):
     """Кнопки объявления.
 
     Свои callback'и, а не менюшные: обычная кнопка меню правит сообщение на
     месте, а объявление затирать нельзя — человек может захотеть перечитать
     его позже. Поэтому у этих кнопок отдельные обработчики, которые лишь
     снимают клавиатуру и присылают нужный экран новым сообщением.
+
+    Кнопки рефералки несут ссылку конкретного человека, поэтому такая
+    клавиатура собирается под каждого получателя (`user_id`).
     """
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
+    from bot.keyboards.keyboards import referral_buttons
+    from bot.services import referral_link
 
     rows = []
     if broadcast.with_connect_button:
         rows.append([InlineKeyboardButton(
             text=CONNECT_BUTTON_TEXT, callback_data=CONNECT_CALLBACK, style="success"
         )])
+    if broadcast.with_referral_buttons and user_id is not None:
+        rows.extend([button] for button in referral_buttons(referral_link(user_id)))
     if broadcast.with_menu_button:
-        rows.append([InlineKeyboardButton(text=MENU_BUTTON_TEXT, callback_data=MENU_CALLBACK)])
+        menu_callback = (
+            MENU_KEEP_REFERRAL_CALLBACK if broadcast.with_referral_buttons else MENU_CALLBACK
+        )
+        rows.append([InlineKeyboardButton(text=MENU_BUTTON_TEXT, callback_data=menu_callback)])
     return InlineKeyboardMarkup(inline_keyboard=rows) if rows else None
 
 
@@ -138,10 +152,11 @@ async def run(bot, broadcast_id: int) -> dict:
     await sync_to_async(Broadcast.objects.filter(pk=broadcast_id).update)(
         status=BroadcastStatusEnum.SENDING, started_at=now()
     )
-    keyboard = keyboard_for(broadcast)
+    shared_keyboard = None if broadcast.with_referral_buttons else keyboard_for(broadcast)
     sent = failed = 0
 
     for user in targets:
+        keyboard = shared_keyboard or keyboard_for(broadcast, user.pk)
         delivered, error = await _send_one(bot, user.pk, broadcast, keyboard)
         await sync_to_async(BroadcastDelivery.objects.update_or_create)(
             broadcast=broadcast,

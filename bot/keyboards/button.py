@@ -5,7 +5,7 @@ callback_data, и ключом для текста. Так нельзя разъ
 кнопки, её текстом и обработчиком.
 """
 
-from aiogram.types import InlineKeyboardButton
+from aiogram.types import CopyTextButton, InlineKeyboardButton
 
 
 class Button:
@@ -56,6 +56,13 @@ class Button:
         url = kwargs.get("url")
         if url:
             return InlineKeyboardButton(text=text, url=url, style=style, icon_custom_emoji_id=icon)
+        copy_text = kwargs.get("copy_text")
+        if copy_text:
+            # Кнопка кладёт текст в буфер обмена сама, без сообщения от бота.
+            return InlineKeyboardButton(
+                text=text, copy_text=CopyTextButton(text=copy_text), style=style,
+                icon_custom_emoji_id=icon,
+            )
         callback_data = kwargs.get("callback_data", self.callback)
         return InlineKeyboardButton(
             text=text, callback_data=callback_data, style=style, icon_custom_emoji_id=icon

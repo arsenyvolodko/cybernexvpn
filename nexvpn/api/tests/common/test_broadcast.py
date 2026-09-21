@@ -165,7 +165,11 @@ def test_buttons_have_their_own_callbacks():
 
 @pytest.mark.parametrize(
     "callback",
-    [broadcast_module.CONNECT_CALLBACK, broadcast_module.MENU_CALLBACK],
+    [
+        broadcast_module.CONNECT_CALLBACK,
+        broadcast_module.MENU_CALLBACK,
+        broadcast_module.MENU_KEEP_REFERRAL_CALLBACK,
+    ],
 )
 def test_broadcast_buttons_are_handled(callback):
     """Иначе они молча улетят в legacy-заглушку «кнопка устарела».
@@ -183,6 +187,100 @@ def test_broadcast_buttons_are_handled(callback):
         for handler in router.callback_query.handlers
     )
     assert matched, f"{callback} никто не обрабатывает"
+
+
+def test_referral_buttons_carry_each_recipients_own_link():
+    item = make_broadcast(with_referral_buttons=True, with_menu_button=True)
+
+    first = broadcast_module.keyboard_for(item, 101)
+    second = broadcast_module.keyboard_for(item, 202)
+
+    def copied(keyboard):
+        return next(b.copy_text.text for row in keyboard.inline_keyboard for b in row if b.copy_text)
+
+    assert copied(first).endswith("?start=101")
+    assert copied(second).endswith("?start=202")
+    texts = [row[0].text for row in first.inline_keyboard]
+    assert texts == ["Поделиться ссылкой", "Скопировать ссылку", broadcast_module.MENU_BUTTON_TEXT]
+    assert first.inline_keyboard[-1][0].callback_data == broadcast_module.MENU_KEEP_REFERRAL_CALLBACK
+
+
+def test_plain_menu_button_keeps_its_old_callback():
+    """Новая «В меню» — только для рассылок с рефералкой, обычная не меняется."""
+    keyboard = broadcast_module.keyboard_for(make_broadcast(with_menu_button=True))
+
+    assert keyboard.inline_keyboard[0][0].callback_data == broadcast_module.MENU_CALLBACK
+
+
+def test_referral_broadcast_sends_each_their_own_keyboard():
+    class RecordingBot(FakeBot):
+        def __init__(self):
+            super().__init__()
+            self.markups = {}
+
+        async def send_message(self, chat_id, text, reply_markup=None):
+            self.markups[chat_id] = reply_markup
+            await super().send_message(chat_id, text, reply_markup)
+
+    one, two = NexUserFactory(), NexUserFactory()
+    bot = RecordingBot()
+    run(bot, make_broadcast(with_referral_buttons=True))
+
+    for user in (one, two):
+        link = bot.markups[user.pk].inline_keyboard[1][0].copy_text.text
+        assert link.endswith(f"?start={user.pk}")
+
+
+class FakeMessage:
+    def __init__(self, keyboard):
+        from types import SimpleNamespace
+
+        self.chat = SimpleNamespace(id=1)
+        self.reply_markup = keyboard
+        self.edited_to = "не трогали"
+        self.answered = []
+
+    async def edit_reply_markup(self, reply_markup=None):
+        self.edited_to = reply_markup
+
+    async def answer(self, text, reply_markup=None):
+        self.answered.append(text)
+
+
+class FakeCall:
+    def __init__(self, message):
+        self.message = message
+
+    async def answer(self, *args, **kwargs):
+        pass
+
+
+def test_menu_on_referral_broadcast_removes_only_itself():
+    from bot import texts
+    from bot.handlers.broadcast import handle_menu_keeping_referral
+
+    keyboard = broadcast_module.keyboard_for(
+        make_broadcast(with_referral_buttons=True, with_menu_button=True), 101
+    )
+    message = FakeMessage(keyboard)
+
+    async_to_sync(handle_menu_keeping_referral)(FakeCall(message))
+
+    left = [row[0].text for row in message.edited_to.inline_keyboard]
+    assert left == ["Поделиться ссылкой", "Скопировать ссылку"]
+    assert message.answered == [texts.MAIN_MENU]
+
+
+def test_plain_menu_still_removes_the_whole_keyboard():
+    from bot.handlers.broadcast import handle_menu_from_broadcast
+
+    message = FakeMessage(broadcast_module.keyboard_for(
+        make_broadcast(with_connect_button=True, with_menu_button=True)
+    ))
+
+    async_to_sync(handle_menu_from_broadcast)(FakeCall(message))
+
+    assert message.edited_to is None
 
 
 def test_only_the_asked_button_appears():

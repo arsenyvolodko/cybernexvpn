@@ -17,7 +17,7 @@ class ButtonsTextStorage(ABC):
     CONNECT = "Подключиться"
     MY_DEVICES = "Мои устройства 📱"
     CHANGE_PLAN = "Сменить тариф 🔄"
-    RENEW = "Продлить подписку 💳"
+    RENEW = "Продлить подписку"  # эмодзи — анимированная иконка
     PAY = "Перейти к оплате 💳"
     CHANGE_PLAN_FREE = "Перейти бесплатно"
     WEB_VERSION = "Веб-версия 🌐"
@@ -35,6 +35,7 @@ class ButtonsTextStorage(ABC):
 
     # рефералка и поддержка
     SHARE_REFERRAL = "Поделиться ссылкой"  # эмодзи — анимированная иконка
+    COPY_REFERRAL = "Скопировать ссылку"  # эмодзи — анимированная иконка
     SUPPORT = "Написать в поддержку ✍️"
 
 
@@ -54,7 +55,7 @@ class ButtonsStorage(metaclass=AutoNameButtonMeta):
     MY_DEVICES = Button()
     CHANGE_PLAN = Button()
     # Оплата и продление — тоже деньги в кассу, их тоже выделяем.
-    RENEW = Button(style="success")
+    RENEW = Button(style="success", icon="5267300544094948794")
     PAY = Button(style="success")
     CHANGE_PLAN_FREE = Button()
     WEB_VERSION = Button()
@@ -74,6 +75,7 @@ class ButtonsStorage(metaclass=AutoNameButtonMeta):
     CONNECT_OK = Button()
 
     SHARE_REFERRAL = Button(icon="5190859184312167965")
+    COPY_REFERRAL = Button(icon="5413422358071372326")
     SUPPORT = Button()
 
 

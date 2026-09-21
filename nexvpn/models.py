@@ -776,6 +776,14 @@ class Broadcast(models.Model):
         verbose_name="Кнопка «В меню»",
         help_text="Обе кнопки не правят объявление: снимают с него клавиатуру и присылают экран новым сообщением",
     )
+    with_referral_buttons = models.BooleanField(
+        default=False,
+        verbose_name="Кнопки рефералки",
+        help_text=(
+            "«Поделиться ссылкой» и «Скопировать ссылку» — у каждого получателя своя ссылка. "
+            "«В меню» у такой рассылки снимает только саму себя, кнопки рефералки остаются"
+        ),
+    )
     status = models.CharField(
         max_length=15, choices=BroadcastStatusEnum.choices, default=BroadcastStatusEnum.DRAFT
     )
