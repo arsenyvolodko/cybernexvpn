@@ -59,9 +59,12 @@ CATALOG: dict[Platform, PlatformGuide] = {
     Platform.MACOS: PlatformGuide(
         title="Mac 💻",
         downloads=[
+            # На M1 и новее ставится iPhone-версия из App Store (флаг
+            # isIOSBinaryMacOSCompatible, проверено 21.09.2026). На Intel
+            # iPhone-приложения не ставятся — для них остаётся .dmg.
             DownloadLink(
                 "Скачать INCY (Apple M1 и новее)",
-                "https://github.com/INCY-DEV/incy-platforms/releases/latest/download/incy-macos-arm64.dmg",
+                "https://apps.apple.com/ru/app/incy/id6756943388",
             ),
             DownloadLink(
                 "Скачать INCY (Intel)",
@@ -69,8 +72,10 @@ CATALOG: dict[Platform, PlatformGuide] = {
             ),
         ],
         install_hint=(
-            "Скачай .dmg под свой процессор и перетащи INCY в «Программы». "
-            "Какой процессор — смотри в меню Apple → «Об этом Mac»: «Apple M…» или «Intel»."
+            "Если у тебя MacBook с процессором Apple M1 и новее — просто скачай приложение в App Store.\n"
+            "Если у тебя MacBook с процессором Intel, то скачай с официального сайта.\n\n"
+            "P.s. Если не уверен, какой у тебя MacBook, то просто попробуй сначала скачать из App Store. "
+            "Если ссылка не откроется корректно, то скачай с официального сайта ;)\n"
         ),
     ),
     Platform.WINDOWS: PlatformGuide(
