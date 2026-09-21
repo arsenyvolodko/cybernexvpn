@@ -452,7 +452,14 @@ class BroadcastAdmin(admin.ModelAdmin):
     readonly_fields = ("status", "sent_count", "failed_count", "created_at", "started_at", "finished_at")
     actions = ("action_send_to_admin", "action_send")
     fieldsets = (
-        (None, {"fields": ("title", "text")}),
+        (None, {
+            "fields": ("title", "text"),
+            "description": (
+                "Анимированный эмодзи в тексте: <code>{emoji_5267300544094948794}</code> или "
+                "<code>{emoji_5267300544094948794:💸}</code> — после двоеточия обычный эмодзи, "
+                "который увидят, если анимированный не отрисуется (без него — ⭐)."
+            ),
+        }),
         ("Кому и как", {"fields": (
             "audience", "with_connect_button", "with_menu_button", "with_referral_buttons", "test_only",
         )}),

@@ -283,6 +283,32 @@ def test_plain_menu_still_removes_the_whole_keyboard():
     assert message.edited_to is None
 
 
+def test_emoji_placeholders_become_telegram_tags():
+    text = "{emoji_5231449120635370684:💸}Дни{emoji_5267300544094948794} и {обычные} скобки"
+
+    assert broadcast_module.render_text(text) == (
+        '<tg-emoji emoji-id="5231449120635370684">💸</tg-emoji>Дни'
+        '<tg-emoji emoji-id="5267300544094948794">⭐</tg-emoji> и {обычные} скобки'
+    )
+
+
+def test_text_broadcast_goes_out_with_emoji_rendered():
+    class RecordingBot(FakeBot):
+        def __init__(self):
+            super().__init__()
+            self.texts = []
+
+        async def send_message(self, chat_id, text, reply_markup=None):
+            self.texts.append(text)
+            await super().send_message(chat_id, text, reply_markup)
+
+    NexUserFactory()
+    bot = RecordingBot()
+    run(bot, make_broadcast(text="Привет {emoji_5303310030940952439:💖}"))
+
+    assert bot.texts == ['Привет <tg-emoji emoji-id="5303310030940952439">💖</tg-emoji>']
+
+
 def test_only_the_asked_button_appears():
     only_menu = broadcast_module.keyboard_for(make_broadcast(with_menu_button=True))
 

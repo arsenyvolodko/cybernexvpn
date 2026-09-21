@@ -12,6 +12,7 @@
 
 import asyncio
 import logging
+import re
 
 from aiogram.exceptions import TelegramAPIError, TelegramForbiddenError, TelegramRetryAfter
 from asgiref.sync import sync_to_async
@@ -34,6 +35,20 @@ MENU_CALLBACK = "bcast_menu"
 MENU_KEEP_REFERRAL_CALLBACK = "bcast_menu_ref"
 CONNECT_BUTTON_TEXT = "Подключиться бесплатно ⚡"
 MENU_BUTTON_TEXT = "В меню"
+
+# Анимированный эмодзи в тексте рассылки: `{emoji_<id>}` или `{emoji_<id>:💸}`.
+# После двоеточия — обычный эмодзи, который Telegram покажет, если кастомный
+# отрисовать не сможет; без него подставляем DEFAULT_EMOJI_FALLBACK.
+EMOJI_PLACEHOLDER = re.compile(r"\{emoji_(\d+)(?::([^{}\s]+))?\}")
+DEFAULT_EMOJI_FALLBACK = "⭐"
+
+
+def render_text(text: str) -> str:
+    """Развернуть плейсхолдеры эмодзи в теги Telegram. Остальной текст не трогаем."""
+    return EMOJI_PLACEHOLDER.sub(
+        lambda m: f'<tg-emoji emoji-id="{m.group(1)}">{m.group(2) or DEFAULT_EMOJI_FALLBACK}</tg-emoji>',
+        text,
+    )
 
 
 def recipients(broadcast: Broadcast) -> list[NexUser]:
@@ -121,7 +136,7 @@ async def _deliver(bot, chat_id: int, broadcast: Broadcast, keyboard):
             message_id=broadcast.source_message_id,
             reply_markup=keyboard,
         )
-    return await bot.send_message(chat_id, broadcast.text, reply_markup=keyboard)
+    return await bot.send_message(chat_id, render_text(broadcast.text), reply_markup=keyboard)
 
 
 async def _send_one(bot, chat_id: int, broadcast: Broadcast, keyboard) -> tuple[bool, str]:
