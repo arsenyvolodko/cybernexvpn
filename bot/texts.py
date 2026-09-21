@@ -411,9 +411,10 @@ EMAIL_SAVED = "Записал: {email}. Поменять можно в любо�
 _COIN_3 = '<tg-emoji emoji-id="5381879959335738545">3️⃣</tg-emoji>'
 _COIN_1 = '<tg-emoji emoji-id="5382322671679708881">1️⃣</tg-emoji>'
 _COIN_0 = '<tg-emoji emoji-id="5393480373944459905">0️⃣</tg-emoji>'
+_REFERRAL_TITLE_ICON = '<tg-emoji emoji-id="5231449120635370684">💸</tg-emoji>'
 
 REFERRAL = (
-    "💸<b>Реферальная программа</b>\n\n"
+    f"<b>Реферальная программа</b> {_REFERRAL_TITLE_ICON}\n\n"
     f"До {_COIN_3}{_COIN_0} <b>бесплатных дней</b> к подписке тебе и до {_COIN_1}{_COIN_0} приглашённому другу!\n\n"
     "Подробнее про то, как это работает:\n"
     "<blockquote expandable>"

@@ -324,10 +324,8 @@ def platform_connect(platform: Platform, connect_url: str, subscription_url: str
 def referral(link: str) -> InlineKeyboardMarkup:
     """«Поделиться» открывает выбор чата прямо в Telegram."""
     return _rows(
-        InlineKeyboardButton(
-            text=ButtonsStorage.SHARE_REFERRAL.text,
-            url=f"https://t.me/share/url?url={link}",
-        ),
+        # Через get_button, а не вручную: так до Telegram доезжает иконка.
+        ButtonsStorage.SHARE_REFERRAL.get_button(url=f"https://t.me/share/url?url={link}"),
         back_to=MENU,
     )
 

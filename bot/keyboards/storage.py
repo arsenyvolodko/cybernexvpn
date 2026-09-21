@@ -34,7 +34,7 @@ class ButtonsTextStorage(ABC):
     CONNECT_OK = "Хорошо 👌"
 
     # рефералка и поддержка
-    SHARE_REFERRAL = "Поделиться ссылкой 📤"
+    SHARE_REFERRAL = "Поделиться ссылкой"  # эмодзи — анимированная иконка
     SUPPORT = "Написать в поддержку ✍️"
 
 
@@ -73,7 +73,7 @@ class ButtonsStorage(metaclass=AutoNameButtonMeta):
     # стоят или ведут дальше по сценарию, а это просто «прочитал».
     CONNECT_OK = Button()
 
-    SHARE_REFERRAL = Button()
+    SHARE_REFERRAL = Button(icon="5190859184312167965")
     SUPPORT = Button()
 
 

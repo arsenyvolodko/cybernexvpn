@@ -131,6 +131,16 @@ def test_main_menu_buttons_carry_animated_icons():
     }
 
 
+def test_share_referral_button_carries_its_icon():
+    """Кнопка-ссылка раньше собиралась вручную из текста — иконка бы не доехала."""
+    from bot.keyboards import keyboards
+
+    share = keyboards.referral("https://t.me/bot?start=1").inline_keyboard[0][0]
+    assert share.text == "Поделиться ссылкой"
+    assert share.icon_custom_emoji_id == "5190859184312167965"
+    assert share.url == "https://t.me/share/url?url=https://t.me/bot?start=1"
+
+
 def test_the_screen_text_names_the_button_that_exists():
     """Текст просит «нажми ...» — имя должно совпадать с кнопкой на экране."""
     from bot import texts
