@@ -291,6 +291,92 @@ def test_legacy_user_cannot_be_invitee(plans):
         service.register_invitation(inviter, invitee)
 
 
+def test_paying_customer_cannot_be_invitee(plans):
+    """Иначе любой клиент жмёт чужую ссылку и на следующей оплате получает дни."""
+    inviter = NexUserFactory(id=40)
+    invitee = NexUserFactory(id=41)
+    SubscriptionFactory(user=invitee, plan=plans[3], expires_at=now() + timedelta(days=3))
+    service.purchase_period(invitee, plans[3], amount=400)
+
+    with pytest.raises(service.SubscriptionError):
+        service.register_invitation(inviter, invitee)
+
+
+def test_trial_user_can_still_be_invitee(plans):
+    """Пробный — не оплата: друг, который дожал человека до первой покупки, бонус заслужил."""
+    inviter = NexUserFactory(id=42)
+    invitee = NexUserFactory(id=43)
+    service.grant_trial(invitee)
+
+    assert service.register_invitation(inviter, invitee).invitee == invitee
+
+
+def test_legacy_invitation_does_not_pay_out(plans):
+    """Приглашение из WireGuard-базы: награду за него выдала ещё старая
+    система, а `reward_granted_at` там пустой. На проде это дало 20.09.2026
+    +10 приглашённому и +30 пригласившему за давно оплаченное приглашение."""
+    inviter = NexUserFactory(id=44)
+    invitee = NexUserFactory(id=45, is_legacy=True)
+    SubscriptionFactory(user=inviter, plan=plans[3], expires_at=now() + timedelta(days=10))
+    SubscriptionFactory(user=invitee, plan=plans[3], expires_at=now() + timedelta(days=3))
+    UserInvitation.objects.create(inviter=inviter, invitee=invitee)
+    inviter_before = inviter.subscription.expires_at
+    invitee_before = invitee.subscription.expires_at
+
+    service.purchase_period(invitee, plans[3], amount=400)
+
+    inviter.subscription.refresh_from_db()
+    invitee.subscription.refresh_from_db()
+    assert inviter.subscription.expires_at == inviter_before
+    assert invitee.subscription.expires_at == expiry_after(30, base=invitee_before)
+    assert not SubscriptionEvent.objects.filter(
+        reason__in=[SubscriptionEventReasonEnum.REFERRAL_INVITER, SubscriptionEventReasonEnum.REFERRAL_INVITEE]
+    ).exists()
+
+
+def test_invitation_after_earlier_payment_does_not_pay_out(plans):
+    """Бонус — за первую оплату, а не за первую после появления приглашения."""
+    inviter = NexUserFactory(id=46)
+    invitee = NexUserFactory(id=47)
+    SubscriptionFactory(user=invitee, plan=plans[3], expires_at=now() + timedelta(days=3))
+    service.purchase_period(invitee, plans[3], amount=400)
+    # В обход `register_invitation` — так на проде лежат старые записи.
+    UserInvitation.objects.create(inviter=inviter, invitee=invitee)
+
+    service.purchase_period(invitee, plans[3], amount=400)
+
+    assert UserInvitation.objects.get(invitee=invitee).reward_granted_at is None
+    assert not Subscription.objects.filter(user=inviter).exists()
+
+
+def test_purchase_returns_expiry_with_referral_bonus(plans):
+    """Возвращённую подписку синкают в панель. Если в ней срок без бонуса,
+    панель следующим `user.modified` откатывает бонус у нас — на проде так
+    съело 10 дней у троих приглашённых с 18.09.2026."""
+    inviter = NexUserFactory(id=48)
+    invitee = NexUserFactory(id=49)
+    SubscriptionFactory(user=invitee, plan=plans[3], expires_at=now() + timedelta(days=3))
+    service.register_invitation(inviter, invitee)
+
+    returned = service.purchase_period(invitee, plans[3], amount=400)
+
+    assert returned.expires_at == Subscription.objects.get(user=invitee).expires_at
+
+
+def test_paid_upgrade_returns_expiry_with_referral_bonus(plans):
+    inviter = NexUserFactory(id=50)
+    invitee = NexUserFactory(id=51)
+    SubscriptionFactory(user=invitee, plan=plans[1], expires_at=now() + timedelta(days=30))
+    service.register_invitation(inviter, invitee)
+
+    returned = service.change_plan_now(invitee, plans[3], amount_paid=250)
+
+    assert SubscriptionEvent.objects.filter(
+        user=invitee, reason=SubscriptionEventReasonEnum.REFERRAL_INVITEE
+    ).exists()
+    assert returned.expires_at == Subscription.objects.get(user=invitee).expires_at
+
+
 def test_plan_prices_are_editable_without_touching_history(plans):
     """Смена цены в админке не переписывает уже начисленное."""
     subscription = SubscriptionFactory(plan=plans[3], expires_at=now() + timedelta(days=5))

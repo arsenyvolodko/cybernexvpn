@@ -194,7 +194,11 @@ def purchase_period(
         payment=payment,
         comment=f"{months} мес." if months > 1 else "",
     )
-    grant_referral_rewards_if_first_payment(user)
+    if grant_referral_rewards_if_first_payment(user):
+        # Бонус начислен через свой экземпляр подписки, у нашего срок устарел.
+        # Отдать наружу старый нельзя: его синкают в панель, панель получает
+        # срок без бонуса и следующим `user.modified` откатывает бонус у нас.
+        subscription.refresh_from_db()
     return subscription
 
 
@@ -292,8 +296,9 @@ def change_plan_now(
         comment=f"{old_plan.device_limit} → {new_plan.device_limit} устр., остаток {days_left} → {converted_days} дн.",
     )
 
-    if amount_paid > 0:
-        grant_referral_rewards_if_first_payment(user)
+    if amount_paid > 0 and grant_referral_rewards_if_first_payment(user):
+        # См. `purchase_period`: без этого в панель уедет срок без бонуса.
+        subscription.refresh_from_db()
     return subscription
 
 
@@ -408,9 +413,18 @@ def register_invitation(inviter: NexUser, invitee: NexUser) -> UserInvitation:
         raise SubscriptionError("Нельзя пригласить самого себя")
     if invitee.is_legacy:
         raise SubscriptionError("Пользователь из старой базы не может быть приглашённым")
+    if _has_paid(invitee):
+        # Бонус — за приведённого клиента. Кто уже платит, того никто не привёл:
+        # иначе любой клиент жмёт чужую ссылку и на следующей оплате получает дни.
+        raise SubscriptionError("Пользователь уже платил — приглашённым быть не может")
     if UserInvitation.objects.filter(invitee=invitee).exists():
         raise SubscriptionError("Пользователь уже пришёл по чьей-то ссылке")
     return UserInvitation.objects.create(inviter=inviter, invitee=invitee)
+
+
+def _has_paid(user: NexUser) -> bool:
+    """Была ли у человека хоть одна оплата. Деньги несут только оплата периода и доплата за тариф."""
+    return SubscriptionEvent.objects.filter(user=user, amount__gt=0).exists()
 
 
 @transaction.atomic
@@ -433,6 +447,14 @@ def grant_referral_rewards_if_first_payment(invitee: NexUser) -> bool:
         .first()
     )
     if invitation is None:
+        return False
+
+    if invitee.is_legacy:
+        # Приглашение переехало из WireGuard-базы: за него платила ещё старая
+        # система, а `reward_granted_at` появился уже после и остался пустым.
+        return False
+    if SubscriptionEvent.objects.filter(user=invitee, amount__gt=0).count() > 1:
+        # Оплата, которая нас вызвала, уже записана — значит, была и более ранняя.
         return False
 
     invitation.reward_granted_at = now()
