@@ -79,7 +79,7 @@ class ButtonsStorage(metaclass=AutoNameButtonMeta):
     CONNECT_OK = Button(icon="5287478236027040039")
 
     SHARE_REFERRAL = Button(icon="5190859184312167965")
-    PROMO = Button()
+    PROMO = Button(icon="5240228673738527951")
     ENTER_PROMO = Button()
     COPY_REFERRAL = Button(icon="5413422358071372326")
     SUPPORT = Button()

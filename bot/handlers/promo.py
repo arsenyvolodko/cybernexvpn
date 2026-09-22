@@ -6,16 +6,17 @@
 доказательство, бот пересылает его администратору с кнопками
 «Подтвердить» / «Отклонить».
 
-Пока человек в сценарии подтверждения, все его сообщения уходят
-администратору: альбом из нескольких фото приходит несколькими сообщениями, и
-дослать что-то следом — нормально. Как только заявку разобрали, пересылка
-прекращается.
+Подтверждение — одна отправка: одно сообщение или один альбом. Альбом
+Telegram присылает несколькими сообщениями с общим `media_group_id`, поэтому
+его части пересылаем все, а всё прочее после первой отправки уже не
+подтверждение — оно уходит в обычные сценарии бота.
 """
 
 import html
 import logging
 
 from aiogram import F, Router
+from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -126,11 +127,15 @@ async def handle_discount_button(
 @router.message(PromoForm.waiting_proof)
 async def handle_discount_proof(message: Message, user: NexUser, state: FSMContext) -> None:
     data = await state.get_data()
-    request_id = data.get("request_id")
-    if request_id is not None and not await discount_request_is_pending(request_id):
-        # Заявку уже разобрали — дальше это обычные сообщения, не доказательства.
-        await state.clear()
-        return
+    if data.get("request_id") is not None:
+        # Отправка уже была. Дальше ждём только остальные части того же альбома.
+        album = data.get("media_group_id")
+        if album is None or message.media_group_id != album:
+            await state.clear()
+            raise SkipHandler()  # это уже не подтверждение — пусть разберут другие сценарии
+        if not await discount_request_is_pending(data["request_id"]):
+            await state.clear()
+            return
 
     discount = await get_menu_discount(user, data.get("discount_id") or 0)
     if discount is None:
@@ -138,7 +143,7 @@ async def handle_discount_proof(message: Message, user: NexUser, state: FSMConte
         return
 
     request, created = await open_discount_request(user, discount)
-    await state.update_data(request_id=request.pk)
+    await state.update_data(request_id=request.pk, media_group_id=message.media_group_id)
 
     admin_id = settings.TG_ADMIN_USER_ID
     if not admin_id:

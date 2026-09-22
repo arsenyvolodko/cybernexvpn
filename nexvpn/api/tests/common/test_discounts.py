@@ -368,9 +368,10 @@ class FakeState:
 
 
 class FakeMessage:
-    def __init__(self, user, text=""):
+    def __init__(self, user, text="", album=None):
         self.from_user = SimpleNamespace(id=user.pk, username="vasya", full_name="Вася")
         self.text, self.caption = text, None
+        self.media_group_id = album
         self.answers, self.to_admin, self.forwarded_to = [], [], []
         outer = self
 
@@ -411,35 +412,63 @@ def test_entering_code_applies_it_or_lets_retry(plans):
     assert state.state is None
 
 
-def test_proof_album_makes_one_request_and_everything_reaches_admin(plans, settings):
+def _student(plans):
+    return make_discount({plans[1]: 99}, kind=Discount.Kind.VERIFICATION, title="Студенты",
+                         show_in_menu=True, verification_prompt="Пришли студак")
+
+
+def test_single_proof_reaches_admin_and_nothing_after_it(plans, settings):
+    from aiogram.dispatcher.event.bases import SkipHandler
+
     from bot import texts
     from bot.handlers.promo import handle_discount_proof
 
     settings.TG_ADMIN_USER_ID = 999
     user = NexUserFactory()
-    student = make_discount({plans[1]: 99}, kind=Discount.Kind.VERIFICATION, title="Студенты",
-                            show_in_menu=True, verification_prompt="Пришли студак")
+    student = _student(plans)
     state = FakeState()
     state.data = {"discount_id": student.pk}
 
-    first, second = FakeMessage(user), FakeMessage(user, "и вот ещё")
+    first = FakeMessage(user, "вот студак")
     async_to_sync(handle_discount_proof)(first, user, state)
-    async_to_sync(handle_discount_proof)(second, user, state)
 
-    request = UserDiscount.objects.get(user=user, discount=student)
     header = first.to_admin[0]
     assert header[0] == 999 and f"id: <code>{user.pk}</code>" in header[1] and "Студенты" in header[1]
-    buttons = [b.text for b in header[2].inline_keyboard[0]]
-    assert buttons == ["Подтвердить", "❌ Отклонить"]
-    assert first.forwarded_to == [999] and second.forwarded_to == [999]
-    assert second.to_admin == [], "шапка заявки — одна"
-    assert first.answers[0][0] == texts.DISCOUNT_REQUEST_RECEIVED and second.answers == []
+    assert [b.text for b in header[2].inline_keyboard[0]] == ["Подтвердить", "❌ Отклонить"]
+    assert first.forwarded_to == [999]
+    assert first.answers[0][0] == texts.DISCOUNT_REQUEST_RECEIVED
+    assert "добавить" not in texts.DISCOUNT_REQUEST_RECEIVED
 
-    discounts.decide(request.pk, approve=True)
-    later = FakeMessage(user, "спасибо!")
-    async_to_sync(handle_discount_proof)(later, user, state)
-    assert later.forwarded_to == [] and state.state is None, "после решения не пересылаем"
+    after = FakeMessage(user, "а ещё вопрос")
+    with pytest.raises(SkipHandler):
+        async_to_sync(handle_discount_proof)(after, user, state)
+    assert after.forwarded_to == [] and after.answers == [] and state.state is None
     assert UserDiscount.objects.filter(user=user, discount=student).count() == 1
+
+
+def test_album_counts_as_one_send(plans, settings):
+    from aiogram.dispatcher.event.bases import SkipHandler
+
+    from bot.handlers.promo import handle_discount_proof
+
+    settings.TG_ADMIN_USER_ID = 999
+    user = NexUserFactory()
+    student = _student(plans)
+    state = FakeState()
+    state.data = {"discount_id": student.pk}
+
+    photos = [FakeMessage(user, album="A1") for _ in range(3)]
+    for photo in photos:
+        async_to_sync(handle_discount_proof)(photo, user, state)
+
+    assert [p.forwarded_to for p in photos] == [[999], [999], [999]]
+    assert len(photos[0].to_admin) == 1 and photos[1].to_admin == photos[2].to_admin == []
+    assert len(photos[0].answers) == 1 and photos[1].answers == photos[2].answers == []
+
+    other = FakeMessage(user, album="B2")
+    with pytest.raises(SkipHandler):
+        async_to_sync(handle_discount_proof)(other, user, state)
+    assert other.forwarded_to == []
 
 
 def test_admin_approval_notifies_user_and_marks_request(plans):
