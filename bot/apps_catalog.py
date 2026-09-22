@@ -31,13 +31,19 @@ class DownloadLink:
 
 @dataclass(frozen=True)
 class PlatformGuide:
-    title: str
+    title: str  # с эмодзи — для текста сообщения
     downloads: list[DownloadLink]
     install_hint: str
+    # Кнопка выбора устройства: подпись без эмодзи и анимированная иконка
+    # (рисуется слева от текста, поэтому обычного эмодзи в подписи нет).
+    button: str = ""
+    icon: str | None = None
 
 CATALOG: dict[Platform, PlatformGuide] = {
     Platform.IOS: PlatformGuide(
         title="iPhone / iPad 📱",
+        button="iPhone / iPad",
+        icon="5249237260267713750",
         downloads=[
             DownloadLink(
                 "Скачать INCY в App Store",
@@ -48,6 +54,8 @@ CATALOG: dict[Platform, PlatformGuide] = {
     ),
     Platform.ANDROID: PlatformGuide(
         title="Android 🤖",
+        button="Android",
+        icon="5247076780048678577",
         downloads=[
             DownloadLink(
                 "Скачать INCY в Google Play",
@@ -58,6 +66,8 @@ CATALOG: dict[Platform, PlatformGuide] = {
     ),
     Platform.MACOS: PlatformGuide(
         title="Mac 💻",
+        button="Mac",
+        icon="5819127949558812112",
         downloads=[
             # На M1 и новее ставится iPhone-версия из App Store (флаг
             # isIOSBinaryMacOSCompatible, проверено 21.09.2026). На Intel
@@ -80,6 +90,8 @@ CATALOG: dict[Platform, PlatformGuide] = {
     ),
     Platform.WINDOWS: PlatformGuide(
         title="Windows 🖥",
+        button="Windows",
+        icon="5249232071947222979",
         downloads=[
             DownloadLink(
                 "Скачать INCY",

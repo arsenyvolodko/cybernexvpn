@@ -22,10 +22,11 @@ from bot.keyboards.factories import (
 from bot.keyboards.storage import ButtonsStorage
 
 BACK_TEXT = "Назад"
+BACK_ICON = "5352759161945867747"
 
 
 def _back_button(target: str) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text=BACK_TEXT, callback_data=target)
+    return InlineKeyboardButton(text=BACK_TEXT, callback_data=target, icon_custom_emoji_id=BACK_ICON)
 
 
 def _nav_row(back_to: str, with_menu: bool = True) -> list[InlineKeyboardButton]:
@@ -280,8 +281,9 @@ def platforms() -> InlineKeyboardMarkup:
     return _grid(
         [
             InlineKeyboardButton(
-                text=guide.title,
+                text=guide.button or guide.title,
                 callback_data=ConnectCallback(platform=platform.value, step="download").pack(),
+                icon_custom_emoji_id=guide.icon,
             )
             for platform, guide in CATALOG.items()
         ],

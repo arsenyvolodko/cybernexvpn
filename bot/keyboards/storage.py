@@ -47,7 +47,7 @@ class ButtonsStorage(metaclass=AutoNameButtonMeta):
     _texts = ButtonsTextStorage
 
     MAIN_MENU = Button()
-    BACK = Button()
+    BACK = Button(icon="5352759161945867747")
 
     # Иконки — кастомные анимированные эмодзи владельца (21.09.2026).
     MY_SUBSCRIPTION = Button(icon="5278573677900752088")  # ключик

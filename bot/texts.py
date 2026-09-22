@@ -607,7 +607,8 @@ PROMO_APPLIED_BY_LINK = "Промокод «{title}» успешно приме�
 PROMO_LINK_NOT_FOUND = "Промокод из ссылки не найден."
 
 DISCOUNT_ALREADY_ACTIVE = "«{title}» у тебя уже действует."
-DISCOUNT_ALREADY_PENDING = "Заявка на «{title}» уже на проверке — мы сообщим, когда проверим."
+# Заявка висит, а человек снова нажал кнопку: даём прислать заново.
+DISCOUNT_RESUBMIT_NOTE = "\n\nПредыдущая заявка ещё на проверке — новое подтверждение её заменит."
 DISCOUNT_REQUEST_RECEIVED = "Получили, спасибо! Мы сообщим тебе, когда проверим."
 DISCOUNT_APPROVED = "{title} успешно применена!\nЦены на тарифы обновлены."
 DISCOUNT_REJECTED = (

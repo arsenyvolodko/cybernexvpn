@@ -14,6 +14,7 @@ Telegram присылает несколькими сообщениями с о�
 
 import html
 import logging
+from datetime import datetime
 
 from aiogram import F, Router
 from aiogram.dispatcher.event.bases import SkipHandler
@@ -21,7 +22,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 from django.conf import settings
-from django.utils.timezone import localtime
+from django.utils.timezone import localtime, now
 
 from bot import texts
 from bot.broadcast import menu_keyboard
@@ -115,13 +116,18 @@ async def handle_discount_button(
     if status == "active":
         await render(call, texts.DISCOUNT_ALREADY_ACTIVE.format(title=_title(discount)), keyboards.back_to_promo())
         return
-    if status == "pending":
-        await render(call, texts.DISCOUNT_ALREADY_PENDING.format(title=_title(discount)), keyboards.back_to_promo())
-        return
 
     await state.set_state(PromoForm.waiting_proof)
-    await state.update_data(discount_id=discount.pk)
-    await render(call, html.escape(discount.verification_prompt), keyboards.back_to_promo())
+    text = html.escape(discount.verification_prompt)
+    data = {"discount_id": discount.pk}
+    if status == "pending":
+        # Заявка висит — всё равно принимаем подтверждение, оно заменит старое.
+        # Раньше тут был отказ без режима приёма, и присланное фото получало
+        # в ответ просто меню.
+        text += texts.DISCOUNT_RESUBMIT_NOTE
+        data["replace_before"] = now().isoformat()
+    await state.update_data(**data)
+    await render(call, text, keyboards.back_to_promo())
 
 
 @router.message(PromoForm.waiting_proof)
@@ -142,7 +148,10 @@ async def handle_discount_proof(message: Message, user: NexUser, state: FSMConte
         await state.clear()
         return
 
-    request, created = await open_discount_request(user, discount)
+    replace_before = data.get("replace_before")
+    request, created = await open_discount_request(
+        user, discount, datetime.fromisoformat(replace_before) if replace_before else None
+    )
     await state.update_data(request_id=request.pk, media_group_id=message.media_group_id)
 
     admin_id = settings.TG_ADMIN_USER_ID

@@ -864,8 +864,8 @@ def discount_request_state(user: NexUser, discount) -> str:
 
 
 @sync_to_async
-def open_discount_request(user: NexUser, discount):
-    return discounts.open_request(user, discount)
+def open_discount_request(user: NexUser, discount, replace_before=None):
+    return discounts.open_request(user, discount, replace_before)
 
 
 @sync_to_async

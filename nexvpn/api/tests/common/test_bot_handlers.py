@@ -195,6 +195,37 @@ def test_buttons_reach_telegram_with_icons_and_colors():
     assert flat(gate_keyboard())["Я подписался"].icon_custom_emoji_id == "5206607081334906820"
 
 
+def test_platform_buttons_carry_animated_icons():
+    from bot.keyboards import keyboards
+
+    icons = {b.text: b.icon_custom_emoji_id for row in keyboards.platforms().inline_keyboard for b in row
+             if b.text != "Назад"}
+    assert icons == {
+        "iPhone / iPad": "5249237260267713750",
+        "Android": "5247076780048678577",
+        "Mac": "5819127949558812112",
+        "Windows": "5249232071947222979",
+    }
+
+
+def test_every_back_button_has_the_icon():
+    """«Назад» собирается в одном месте — проверяем на разных экранах."""
+    from bot.apps_catalog import Platform
+    from bot.keyboards import keyboards
+
+    screens = [
+        keyboards.platforms(),
+        keyboards.platform_download(Platform.IOS),
+        keyboards.device_detail("t"),
+        keyboards.pay("https://pay"),
+        keyboards.back_to_promo(),
+        keyboards.only_back(back_to=keyboards.SUBSCRIPTION),
+    ]
+    backs = [b for markup in screens for row in markup.inline_keyboard for b in row if b.text == "Назад"]
+    assert len(backs) == len(screens)
+    assert {b.icon_custom_emoji_id for b in backs} == {"5352759161945867747"}
+
+
 def test_the_screen_text_names_the_button_that_exists():
     """Текст просит «нажми ...» — имя должно совпадать с кнопкой на экране."""
     from bot import texts

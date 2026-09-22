@@ -533,3 +533,60 @@ def test_expired_promo_link_says_no_longer_available(plans, monkeypatch):
     async_to_sync(menu.handle_start)(message, SimpleNamespace(args="promo_SPRING"), user, True)
 
     assert message.answers[0][0] == "К сожалению, данный промокод больше не доступен для применения."
+
+
+def test_resubmitting_while_pending_replaces_old_request(plans, settings):
+    """Раньше при висящей заявке кнопка отвечала «уже на проверке» и не
+    включала приём — присланное следом фото получало в ответ просто меню."""
+    from bot import texts
+    from bot.handlers.promo import handle_discount_button, handle_discount_proof
+    from bot.keyboards.factories import DiscountCallback
+
+    settings.TG_ADMIN_USER_ID = 999
+    user = NexUserFactory()
+    student = _student(plans)
+    old, _ = discounts.open_request(user, student)
+    rendered = []
+
+    class Call:
+        message = None
+
+        async def answer(self, *args, **kwargs):
+            pass
+
+    import bot.handlers.promo as promo
+
+    async def fake_render(event, text, keyboard=None, **kwargs):
+        rendered.append(text)
+
+    state = FakeState()
+    original = promo.render
+    promo.render = fake_render
+    try:
+        async_to_sync(handle_discount_button)(Call(), DiscountCallback(discount_id=student.pk), user, state)
+    finally:
+        promo.render = original
+    assert state.state is not None, "приём подтверждения включён"
+    assert rendered[0].endswith(texts.DISCOUNT_RESUBMIT_NOTE)
+
+    photos = [FakeMessage(user, album="A1") for _ in range(2)]
+    for photo in photos:
+        async_to_sync(handle_discount_proof)(photo, user, state)
+
+    old.refresh_from_db()
+    assert old.status == UserDiscount.Status.REPLACED
+    fresh = UserDiscount.objects.get(user=user, discount=student, status=UserDiscount.Status.PENDING)
+    assert fresh.pk != old.pk, "альбом не заменил заявку, которую сам же открыл"
+    assert len(photos[0].to_admin) == 1 and photos[0].answers[0][0] == texts.DISCOUNT_REQUEST_RECEIVED
+    assert discounts.decide(old.pk, approve=True) is None, "по старой заявке решить уже нельзя"
+
+
+def test_rejection_does_not_block_a_new_attempt(plans):
+    user = NexUserFactory()
+    student = _student(plans)
+    first, _ = discounts.open_request(user, student)
+    discounts.decide(first.pk, approve=False)
+
+    assert discounts.request_state(user, student) == "none"
+    second, created = discounts.open_request(user, student)
+    assert created and second.pk != first.pk

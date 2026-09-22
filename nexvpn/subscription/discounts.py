@@ -143,12 +143,21 @@ def request_state(user: NexUser, discount: Discount) -> str:
     return "none"
 
 
-def open_request(user: NexUser, discount: Discount) -> tuple[UserDiscount, bool]:
+def open_request(user: NexUser, discount: Discount, replace_before=None) -> tuple[UserDiscount, bool]:
     """Заявка на проверке. Второе значение — создана ли она сейчас.
 
     Альбом из нескольких фото приходит пачкой параллельных апдейтов; создать
     заявку должен ровно один из них — его и видно по `True`.
+
+    `replace_before` — человек прислал подтверждение заново, пока старая
+    заявка висела. Старую (созданную раньше этого момента) заменяем новой.
+    Граница по времени, а не «все на проверке»: иначе вторая часть альбома
+    заменила бы заявку, которую только что открыла первая.
     """
+    if replace_before is not None:
+        UserDiscount.objects.filter(
+            user=user, discount=discount, status=UserDiscount.Status.PENDING, created_at__lt=replace_before
+        ).update(status=UserDiscount.Status.REPLACED, decided_at=now())
     existing = UserDiscount.objects.filter(
         user=user, discount=discount, status=UserDiscount.Status.PENDING
     ).first()
