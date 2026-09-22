@@ -102,7 +102,12 @@ def users(request):
         {
             "segment": segment,
             "title": queries.SEGMENTS[segment],
-            "rows": queries.users(segment, period, search=request.GET.get("q", "").strip()),
+            "rows": queries.users(
+                segment, period,
+                search=request.GET.get("q", "").strip(),
+                discount=request.GET.get("discount", "").strip(),
+            ),
+            "discounts": queries.discount_options(),
         }
     )
 

@@ -219,6 +219,9 @@
     <div class="head">
       <div><h2>Пользователи</h2><div class="sub" id="userHint">—</div></div>
       <span class="spacer"></span>
+      <select id="discountFilter" title="Фильтр по скидкам и промокодам">
+        <option value="">Скидка: все</option>
+      </select>
       <input type="search" id="q" placeholder="имя, @username или id">
     </div>
     <div class="chips" id="segments"></div>
@@ -237,7 +240,7 @@ const PRESET_LABEL = { "1": "Сегодня", "7": "Последние 7 дне�
                        "90": "Последние 90 дней", "180": "Последние 180 дней", "365": "Последний год" };
 
 const state = { preset: "30", from: "", to: "", granularity: "day",
-                metric: "revenue", segment: "active", day: "", payMode: "paid", q: "" };
+                metric: "revenue", segment: "active", day: "", payMode: "paid", q: "", discount: "" };
 
 const $ = (id) => document.getElementById(id);
 const fmtInt = (n) => (n ?? 0).toLocaleString("ru-RU");
@@ -258,6 +261,28 @@ function fmtBytes(n) {
   while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
   return v.toFixed(v < 10 && i > 0 ? 1 : 0) + " " + units[i];
 }
+// Названия скидок вписываются в админке — в HTML только экранированными.
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+function discountLabel(d) {
+  return d ? esc(d.title) + ' <span class="muted">· ' + esc(d.via.toLowerCase()) + "</span>" : "—";
+}
+
+// Фильтр скидок заполняется из ответа /api/users/: список скидок живёт в
+// админке, и при каждой загрузке он актуальный. Выбранное значение храним.
+function drawDiscountFilter(options) {
+  const select = $("discountFilter");
+  const fixed = [
+    ["", "Скидка: все"], ["any", "Любая действующая"], ["none", "Без скидки"], ["pending", "Заявка на проверке"],
+  ];
+  select.innerHTML = fixed.map(([v, t]) => '<option value="' + v + '">' + t + "</option>").join("") +
+    options.map((d) => '<option value="' + d.id + '">' + esc(d.title) + " (" + d.active + ")</option>").join("");
+  select.value = state.discount;
+}
+
 function tgLink(row) {
   if (!row.username) return row.name || ("id " + row.id);
   return '<a href="https://t.me/' + row.username + '" target="_blank" rel="noopener">@' + row.username + "</a>";
@@ -530,8 +555,9 @@ function drawSegments() {
 }
 
 async function loadUsers() {
-  const data = await api("/dash/api/users/", { segment: state.segment, q: state.q });
+  const data = await api("/dash/api/users/", { segment: state.segment, q: state.q, discount: state.discount });
   if (!data) return;
+  drawDiscountFilter(data.discounts || []);
   $("userHint").textContent = data.title + " — " + data.rows.length +
     // 200 — потолок выборки на сервере. «Показать всех» раскроет то, что
     // доехало, но за этим потолком остаётся ещё хвост, и молчать про него нельзя.
@@ -553,6 +579,8 @@ async function loadUsers() {
     { title: "Трафик", num: true, cell: (r) => fmtBytes(r.traffic), sort: (r) => r.traffic || 0 },
     { title: "Заплатил", num: true, cell: (r) => r.spent ? fmtMoney(r.spent) : "—",
       sort: (r) => r.spent || 0 },
+    { title: "Скидка", cell: (r) => r.discount ? esc(r.discount.title) : "—",
+      sort: (r) => r.discount ? r.discount.title : "" },
     { title: "Пришёл", cell: (r) => fmtDate(r.created_at), sort: (r) => stamp(r.created_at) },
   ], data.rows, (row) => openUser(row.id), { limit: 20 });
 }
@@ -703,6 +731,7 @@ async function openUser(id) {
     kv("Всего заплатил", fmtMoney(u.spent)) +
     kv("Пригласил", u.invited_count + " чел.") +
     kv("Пришёл по ссылке", u.invited_by ? (u.invited_by.username ? "@" + u.invited_by.username : "id " + u.invited_by.id) : "—") +
+    kv("Скидка", u.discount ? discountLabel(u.discount) + " · до " + fmtDate(u.discount.until) : "—") +
     "</div>";
 
   if (u.devices) {
@@ -726,6 +755,11 @@ async function openUser(id) {
     }
   }
 
+  if (u.discount_history && u.discount_history.length) {
+    html += "<h4>Скидки и промокоды</h4><div class='scroll'><table><tbody>" + u.discount_history.map((d) =>
+      "<tr><td>" + fmtDate(d.created_at, true) + "</td><td>" + esc(d.title) + "</td><td>" + esc(d.via) +
+      "</td><td>" + esc(d.status) + "</td></tr>").join("") + "</tbody></table></div>";
+  }
   if (u.payments.length) {
     html += "<h4>Платежи</h4><div class='scroll'><table><tbody>" + u.payments.map((p) =>
       "<tr><td>" + fmtDate(p.processed_at || p.created_at, true) + "</td><td>" + (p.plan || "—") +
@@ -762,6 +796,7 @@ async function reload() {
   loadTunnels();
   loadUsers();
 }
+$("discountFilter").onchange = (e) => { state.discount = e.target.value; loadUsers(); };
 drawSegments();
 reload();
 </script>

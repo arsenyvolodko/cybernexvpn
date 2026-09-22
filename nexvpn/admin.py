@@ -1,5 +1,6 @@
 import logging
 
+from django import forms
 from django.contrib import admin, messages
 from django.forms.models import BaseInlineFormSet
 from django.shortcuts import render
@@ -211,6 +212,67 @@ class PanelPresenceInline(ReadOnlyInline):
     verbose_name_plural = "Присутствие в панели"
 
 
+class NexUserForm(forms.ModelForm):
+    """Карточка человека + назначение скидки. Поля не модельные — их разбирает save_model."""
+
+    assign_discount = forms.ModelChoiceField(
+        queryset=Discount.objects.order_by("title"),
+        required=False,
+        label="Назначить скидку",
+        help_text="Заменит действующую. Будет видно как «назначена администратором». Человеку бот ничего не пишет",
+    )
+    revoke_discount = forms.BooleanField(
+        required=False,
+        label="Снять действующую скидку",
+        help_text="Цены вернутся к обычным. В истории останется «снята администратором»",
+    )
+
+    class Meta:
+        model = NexUser
+        fields = "__all__"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        data = super().clean()
+        if data.get("assign_discount") and data.get("revoke_discount"):
+            raise ValidationError("Либо назначить скидку, либо снять — не одновременно")
+        return data
+
+
+class AssignDiscountForm(forms.Form):
+    discount = forms.ModelChoiceField(queryset=Discount.objects.order_by("title"), label="Скидка")
+
+
+class UserDiscountInline(ReadOnlyInline):
+    model = UserDiscount
+    fk_name = "user"
+    verbose_name_plural = "Скидки и промокоды (действует — одна, остальное история)"
+    fields = ("discount", "status", "via", "created_at", "decided_at")
+    readonly_fields = fields
+    ordering = ("-created_at",)
+
+
+class DiscountFilter(admin.SimpleListFilter):
+    """Кто сейчас со скидкой — какой именно, любой или никакой."""
+
+    title = "скидка"
+    parameter_name = "discount"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("any", "Любая действующая"),
+            ("none", "Без скидки"),
+            ("pending", "Заявка на проверке"),
+            *[(str(d.pk), d.title) for d in Discount.objects.order_by("title")],
+        ]
+
+    def queryset(self, request, queryset):
+        from nexvpn.subscription.discounts import holders_filter
+
+        return holders_filter(queryset, self.value()) if self.value() else queryset
+
+
 class InvitationInline(ReadOnlyInline):
     model = UserInvitation
     fk_name = "inviter"
@@ -260,10 +322,14 @@ class SubscriptionEventAdmin(admin.ModelAdmin):
 class NexUserAdmin(admin.ModelAdmin):
     """Страница человека: подписка правится здесь же, остальное — на просмотр."""
 
-    list_display = ("id", "username", "first_name", "email", "is_legacy", "activated_at")
-    list_filter = ("is_legacy",)
+    list_display = ("id", "username", "first_name", "email", "is_legacy", "activated_at", "current_discount")
+    list_filter = ("is_legacy", DiscountFilter)
     search_fields = ("username", "id", "email")
+    readonly_fields = ("current_discount",)
+    form = NexUserForm
+    actions = ("action_assign_discount", "action_revoke_discount")
     inlines = (
+        UserDiscountInline,
         SubscriptionInline,
         PanelPresenceInline,
         SubscriptionEventInline,
@@ -271,6 +337,65 @@ class NexUserAdmin(admin.ModelAdmin):
         TransactionInline,
         InvitationInline,
     )
+
+    @admin.display(description="Скидка сейчас")
+    def current_discount(self, obj):
+        from django.utils.timezone import localtime
+
+        from nexvpn.subscription.discounts import active_discount
+
+        held = active_discount(obj) if obj is not None and obj.pk else None
+        if held is None:
+            return "—"
+        return (
+            f"{held.discount.title} ({held.get_via_display().lower()}), "
+            f"до {localtime(held.discount.valid_until):%d.%m.%Y}"
+        )
+
+    def save_model(self, request, obj, form, change):
+        from nexvpn.models import UserDiscount
+        from nexvpn.subscription import discounts
+
+        super().save_model(request, obj, form, change)
+        chosen = form.cleaned_data.get("assign_discount")
+        if chosen is not None:
+            discounts.activate(obj, chosen, via=UserDiscount.Via.ADMIN)
+            self.message_user(request, f"Назначена скидка «{chosen.title}»", messages.SUCCESS)
+        elif form.cleaned_data.get("revoke_discount"):
+            if discounts.revoke(obj):
+                self.message_user(request, "Действующая скидка снята", messages.SUCCESS)
+            else:
+                self.message_user(request, "Снимать было нечего — скидки не было", messages.WARNING)
+
+    @admin.action(description="Назначить скидку выбранным")
+    def action_assign_discount(self, request, queryset):
+        from nexvpn.models import UserDiscount
+        from nexvpn.subscription import discounts
+
+        form = AssignDiscountForm(request.POST if "apply" in request.POST else None)
+        if "apply" in request.POST and form.is_valid():
+            chosen = form.cleaned_data["discount"]
+            for user in queryset:
+                discounts.activate(user, chosen, via=UserDiscount.Via.ADMIN)
+            self.message_user(
+                request, f"Скидка «{chosen.title}» назначена: {queryset.count()} чел.", messages.SUCCESS
+            )
+            return None
+        return render(request, "admin/nexvpn/nexuser/assign_discount.html", {
+            **self.admin_site.each_context(request),
+            "title": "Назначить скидку",
+            "opts": self.model._meta,
+            "form": form,
+            "users": queryset,
+            "action": "action_assign_discount",
+        })
+
+    @admin.action(description="Снять скидку у выбранных")
+    def action_revoke_discount(self, request, queryset):
+        from nexvpn.subscription import discounts
+
+        removed = sum(1 for user in queryset if discounts.revoke(user))
+        self.message_user(request, f"Скидка снята: {removed} чел.", messages.SUCCESS)
 
     def save_formset(self, request, form, formset, change):
         """Правка подписки из inline тоже обязана доехать до панели.

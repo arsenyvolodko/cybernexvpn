@@ -695,10 +695,13 @@ class UserDiscount(models.Model):
         ACTIVE = "active", "Действует"
         REJECTED = "rejected", "Отклонена"
         REPLACED = "replaced", "Заменена другой"
+        REVOKED = "revoked", "Снята администратором"
 
     class Via(models.TextChoices):
-        CODE = "code", "По коду"
-        REQUEST = "request", "По заявке"
+        # Первые два — человек получил сам, третий — ты назначил в админке.
+        CODE = "code", "Сам: по коду"
+        REQUEST = "request", "Сам: по заявке"
+        ADMIN = "admin", "Назначена администратором"
 
     user = models.ForeignKey(NexUser, on_delete=models.CASCADE, related_name="discounts")
     discount = models.ForeignKey(Discount, on_delete=models.CASCADE, related_name="holders")

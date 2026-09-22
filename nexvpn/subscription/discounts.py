@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass, field
 
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils.timezone import now
 
 from nexvpn.models import Discount, NexUser, Plan, UserDiscount
@@ -117,6 +118,15 @@ def activate(user: NexUser, discount: Discount, via: str = UserDiscount.Via.CODE
     )
 
 
+def revoke(user: NexUser) -> bool:
+    """Снять действующую скидку (из админки). False — снимать было нечего."""
+    return bool(
+        UserDiscount.objects.filter(user=user, status=UserDiscount.Status.ACTIVE).update(
+            status=UserDiscount.Status.REVOKED, decided_at=now()
+        )
+    )
+
+
 def apply_code(user: NexUser, raw: str) -> CodeResult:
     """Ввод промокода: применяет, если можно, и говорит, что вышло."""
     result = find_code(user, raw)
@@ -215,3 +225,43 @@ def parse_start_payload(payload: str) -> tuple[str, str]:
     referral, _, code = payload.partition("promo_")
     referral = referral.rstrip("_")
     return referral, code
+
+
+# --- для админки и дашборда ---
+
+
+def _active_q(prefix: str = "discounts__") -> Q:
+    """Условие «скидка действует» через связь пользователя со скидками."""
+    return Q(**{
+        f"{prefix}status": UserDiscount.Status.ACTIVE,
+        f"{prefix}discount__is_active": True,
+        f"{prefix}discount__valid_until__gt": now(),
+    })
+
+
+def holders_filter(users, value: str):
+    """Фильтр пользователей по скидке: any / none / pending / id скидки."""
+    if value == "any":
+        return users.filter(_active_q()).distinct()
+    if value == "none":
+        return users.exclude(pk__in=users.filter(_active_q()).values("pk"))
+    if value == "pending":
+        return users.filter(discounts__status=UserDiscount.Status.PENDING).distinct()
+    if str(value).isdigit():
+        return users.filter(_active_q(), discounts__discount_id=int(value)).distinct()
+    return users
+
+
+def active_by_user(user_ids) -> dict[int, UserDiscount]:
+    """Действующие скидки для пачки людей одним запросом — для таблиц."""
+    held = (
+        UserDiscount.objects.filter(
+            user_id__in=list(user_ids),
+            status=UserDiscount.Status.ACTIVE,
+            discount__is_active=True,
+            discount__valid_until__gt=now(),
+        )
+        .select_related("discount")
+        .order_by("created_at")
+    )
+    return {item.user_id: item for item in held}  # позже созданная перетирает раннюю

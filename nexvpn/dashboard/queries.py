@@ -23,7 +23,7 @@ from django.db.models import Count, F, Q, Sum
 from django.utils import timezone
 
 from nexvpn.enums.subscription_event_reason_enum import SubscriptionEventReasonEnum
-from nexvpn.subscription import panel_sync
+from nexvpn.subscription import discounts, panel_sync
 from nexvpn.models import (
     InboundUsageDay,
     RelayNetworkDay,
@@ -226,6 +226,7 @@ def _trial_conversion(period: Period) -> tuple[int, int]:
 
 SEGMENTS = {
     "active": "Активные",
+    "active_week": "Активные за неделю",
     "churned": "Ушли",
     "never_connected": "Ни разу не подключались",
     "expiring": "Истекает на неделе",
@@ -243,6 +244,15 @@ def segment_queryset(segment: str, period: Period | None = None):
 
     if segment == "active":
         return base.filter(subscription__expires_at__gt=moment, presence__first_connected_at__isnull=False)
+
+    if segment == "active_week":
+        # «Активные», которые ещё и реально пользуются: были онлайн за 7 дней.
+        # Обычные «Активные» считают и тех, кто подключился однажды и забыл.
+        return base.filter(
+            subscription__expires_at__gt=moment,
+            presence__first_connected_at__isnull=False,
+            presence__online_at__gte=moment - dt.timedelta(days=7),
+        )
 
     if segment == "churned":
         return base.filter(
@@ -279,13 +289,18 @@ def segment_queryset(segment: str, period: Period | None = None):
     return base
 
 
-def users(segment: str, period: Period, search: str = "", limit: int = 200) -> list[dict]:
-    """Список пользователей сегмента для таблицы."""
+def users(segment: str, period: Period, search: str = "", limit: int = 200, discount: str = "") -> list[dict]:
+    """Список пользователей сегмента для таблицы.
+
+    `discount` — фильтр по скидке: any / none / pending / id скидки.
+    """
     queryset = segment_queryset(segment, period)
     if search:
         queryset = queryset.filter(
             Q(username__icontains=search) | Q(first_name__icontains=search) | Q(id__icontains=search)
         )
+    if discount:
+        queryset = discounts.holders_filter(queryset, discount)
 
     # Материализуем до агрегата: срез в подзапросе `user__in` работает не на
     # каждом бэкенде, а список идентификаторов — везде.
@@ -296,10 +311,36 @@ def users(segment: str, period: Period, search: str = "", limit: int = 200) -> l
         .values_list("user_id")
         .annotate(total=Sum("amount"))
     )
-    return [_user_row(user, spent.get(user.id, 0)) for user in rows]
+    held = discounts.active_by_user(user.id for user in rows)
+    return [_user_row(user, spent.get(user.id, 0), held.get(user.id)) for user in rows]
 
 
-def _user_row(user: NexUser, spent: int = 0) -> dict:
+def discount_options() -> list[dict]:
+    """Скидки для фильтра в дашборде: сколько у кого действует сейчас."""
+    from nexvpn.models import Discount
+
+    counts = dict(
+        discounts.holders_filter(NexUser.objects.all(), "any")
+        .values_list("discounts__discount_id")
+        .annotate(n=Count("id", distinct=True))
+    )
+    return [
+        {"id": d.pk, "title": d.title, "kind": d.get_kind_display(), "active": counts.get(d.pk, 0)}
+        for d in Discount.objects.order_by("title")
+    ]
+
+
+def _discount(held) -> dict | None:
+    if held is None:
+        return None
+    return {
+        "title": held.discount.title,
+        "via": held.get_via_display(),
+        "until": _iso(held.discount.valid_until),
+    }
+
+
+def _user_row(user: NexUser, spent: int = 0, held=None) -> dict:
     subscription = getattr(user, "subscription", None)
     presence = getattr(user, "presence", None)
     return {
@@ -324,6 +365,7 @@ def _user_row(user: NexUser, spent: int = 0) -> dict:
         "online_at": _iso(presence.online_at) if presence else None,
         "traffic": presence.used_traffic if presence else 0,
         "spent": spent,
+        "discount": _discount(held),
     }
 
 
@@ -381,7 +423,17 @@ def user_card(user_id: int) -> dict | None:
     spent = (
         Payment.objects.filter(user=user, processed_at__isnull=False).aggregate(total=Sum("amount"))["total"] or 0
     )
-    card = _user_row(user, spent)
+    card = _user_row(user, spent, discounts.active_discount(user))
+    card["discount_history"] = [
+        {
+            "title": item.discount.title,
+            "status": item.get_status_display(),
+            "via": item.get_via_display(),
+            "created_at": _iso(item.created_at),
+            "decided_at": _iso(item.decided_at),
+        }
+        for item in user.discounts.select_related("discount").order_by("-created_at")[:20]
+    ]
 
     card["events"] = [
         {
