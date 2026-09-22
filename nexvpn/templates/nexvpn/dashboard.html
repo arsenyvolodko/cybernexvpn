@@ -100,6 +100,15 @@
              padding: 1px 5px; color: var(--muted); text-decoration: none; }
   .doors a:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
 
+  /* Тепловая карта в таблице когорт: цвет читается пятнами, число остаётся
+     на месте. Прозрачность зелёного, а не градиент — тёмный текст поверх
+     светлой карточки виден при любой насыщенности. */
+  b.heat { display: inline-block; min-width: 62px; text-align: center; border-radius: 5px;
+           padding: 2px 7px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .cards.inline { margin: 4px 0 14px; }
+  svg.chart .bar { fill: var(--accent); }
+  svg.chart .bar.dim { fill: var(--accent-soft); }
+
   table.matrix th, table.matrix td { padding: 6px 8px; }
   table.matrix th.rot { font-size: 11.5px; line-height: 1.2; white-space: normal;
                         min-width: 74px; max-width: 110px; vertical-align: bottom; }
@@ -170,6 +179,36 @@
   <div class="panel">
     <div class="head">
       <div>
+        <h2>Когорты по неделям регистрации</h2>
+        <div class="sub">Когорта — неделя, в которую человек появился в базе. Деньги и удержание
+          считаются за всю её жизнь, а не за выбранный период: даты в шапке на эту таблицу
+          не влияют. Цвет ячейки — доля относительно лучшей недели в столбце, у заголовков
+          есть подсказки. Строка — клик: откроется список этой когорты.</div>
+      </div>
+      <span class="spacer"></span>
+      <select id="cohortWeeks" title="Сколько недель показывать"></select>
+    </div>
+    <div class="scroll"><table id="cohortTable"></table></div>
+  </div>
+
+  <div class="panel">
+    <div class="head">
+      <div>
+        <h2 id="activityTitle">Активность по дням</h2>
+        <div class="sub" id="activitySub">Всегда по суткам, за выбранный в шапке диапазон дат.</div>
+      </div>
+    </div>
+    <div class="cards inline" id="activityCards"></div>
+    <div class="chips" id="activityChips"></div>
+    <div style="position:relative">
+      <svg class="chart" id="activityChart"></svg>
+      <div class="tip" id="activityTip"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="head">
+      <div>
         <h2>Туннели</h2>
         <div class="sub">Считается по access log нод: соединение попадает сюда, только если оно
           реально установилось. Пустой туннель — это «не выбрали ИЛИ не работает», по логу не различить.</div>
@@ -235,18 +274,22 @@
 const PRESETS = {{ presets|safe }};
 const SEGMENTS = {{ segments|safe }};
 const METRICS = {{ metrics|safe }};
+const ACTIVITY_METRICS = {{ activity_metrics|safe }};
+const COHORT_WEEKS = {{ cohort_weeks|safe }};
 
 const PRESET_LABEL = { "1": "Сегодня", "7": "Последние 7 дней", "30": "Последние 30 дней",
                        "90": "Последние 90 дней", "180": "Последние 180 дней", "365": "Последний год" };
 
 const state = { preset: "30", from: "", to: "", granularity: "day",
-                metric: "revenue", segment: "active", day: "", payMode: "paid", q: "", discount: "" };
+                metric: "revenue", segment: "active", day: "", payMode: "paid", q: "", discount: "",
+                weeks: {{ cohort_weeks_default }}, activityMetric: "active" };
 
 const $ = (id) => document.getElementById(id);
 const fmtInt = (n) => (n ?? 0).toLocaleString("ru-RU");
 const fmtMoney = (n) => fmtInt(n) + " ₽";
 const fmtPercent = (n) => (n ?? 0) + " %";
-const fmtValue = (v, f) => f === "money" ? fmtMoney(v) : f === "percent" ? fmtPercent(v) : fmtInt(v);
+const fmtValue = (v, f) => f === "money" ? fmtMoney(v) : f === "percent" ? fmtPercent(v)
+                          : f === "bytes" ? fmtSize(v) : fmtInt(v);
 
 function fmtDate(iso, withTime) {
   if (!iso) return "—";
@@ -261,6 +304,10 @@ function fmtBytes(n) {
   while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
   return v.toFixed(v < 10 && i > 0 ? 1 : 0) + " " + units[i];
 }
+// На оси и в плитках ноль обязан быть нулём: `fmtBytes` рисует прочерк, и в
+// ряду за сутки без трафика это читалось бы как «данных нет».
+const fmtSize = (n) => n ? fmtBytes(n) : "0";
+
 // Названия скидок вписываются в админке — в HTML только экранированными.
 function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) =>
@@ -339,11 +386,14 @@ $("q").oninput = (e) => {
 };
 
 // ─── плитки ───
-function drawCards(cards) {
-  $("cards").innerHTML = "";
+// Контейнер и «какая метрика сейчас выбрана» приходят снаружи: плитки рисуются
+// и над главным графиком, и над графиком активности, а метрики у них разные.
+function drawCards(box, cards, current, pick) {
+  box.innerHTML = "";
   cards.forEach((c) => {
     const el = document.createElement("div");
-    el.className = "card" + (c.metric ? " click" : "") + (c.metric === state.metric ? " on" : "");
+    const clickable = Boolean(c.metric && pick);
+    el.className = "card" + (clickable ? " click" : "") + (c.metric && c.metric === current ? " on" : "");
     el.title = c.hint || "";
     let delta = "";
     if (c.delta !== null && c.delta !== undefined) {
@@ -352,8 +402,8 @@ function drawCards(cards) {
     }
     el.innerHTML = '<div class="t">' + c.title + '</div><div class="v">' +
                    fmtValue(c.value, c.format) + "</div>" + delta;
-    if (c.metric) el.onclick = () => { state.metric = c.metric; state.day = ""; reload(); };
-    $("cards").append(el);
+    if (clickable) el.onclick = () => pick(c.metric);
+    box.append(el);
   });
 }
 
@@ -433,6 +483,7 @@ function showTip(i, px, py) {
 }
 window.addEventListener("resize", () => {
   if (chartData) drawChart(chartData);
+  if (activityData) drawActivityChart(activityData);
   if (tunnelData) drawMultiChart(tunnelData);
 });
 let tunnelData = null;
@@ -711,6 +762,198 @@ async function loadTunnels() {
   ], data.operators);
 }
 
+// ─── когорты ───
+// Заголовок с подсказкой: у плиток она есть, а в таблице когорт колонок много
+// и половина из них требует объяснения не меньше, чем плитки.
+function th(text, hint) {
+  return '<span title="' + esc(hint) + '">' + text + "</span>";
+}
+
+// Цвет ячейки — насыщенность зелёного относительно лучшей недели в столбце.
+// Не по шкале 0–100 %: конверсии живут в узком коридоре, и на абсолютной
+// шкале вся таблица была бы одинаково бледной.
+function heat(share, peak, text) {
+  if (share === null || share === undefined) return '<span class="muted">—</span>';
+  const weight = peak ? 0.1 + 0.55 * (share / peak) : 0.1;
+  return '<b class="heat" style="background:rgba(18,184,134,' + weight.toFixed(2) + ')">' + text + "</b>";
+}
+
+const peakOf = (rows, key) => Math.max(...rows.map((r) => r[key] || 0), 1);
+const percent = (n) => (n === null || n === undefined) ? "—" : n + " %";
+
+// Провал в когорту: период сверху встаёт на эту неделю, а список людей
+// переключается на «Новые за период» — то есть ровно на эту когорту.
+function openCohort(row) {
+  const monday = new Date(row.week + "T00:00:00Z");
+  const sunday = new Date(monday.getTime() + 6 * 24 * 3600 * 1000);
+  state.from = row.week;
+  state.to = sunday.toISOString().slice(0, 10);
+  $("from").value = state.from;
+  $("to").value = state.to;
+  state.segment = "new";
+  state.day = "";
+  drawSegments();
+  reload();
+  $("userTable").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function drawCohortTable(rows) {
+  const peakConnected = peakOf(rows, "connected_share");
+  const peakConversion = peakOf(rows, "conversion");
+  const peakActive = peakOf(rows, "active_share");
+  const both = (count, share) => fmtInt(count) + ' <span class="muted">· ' + share + " %</span>";
+
+  drawTable($("cohortTable"), [
+    { title: th("Неделя", "Понедельник — воскресенье, когда эти люди появились в базе"),
+      sort: (r) => r.week,
+      cell: (r) => r.label + (r.partial ? ' <span class="tag">идёт</span>' : "") },
+    { title: th("Новых", "Сколько человек завелось в базе за эту неделю"), num: true,
+      sort: (r) => r.users, cell: (r) => fmtInt(r.users) },
+    { title: th("Подключились", "Из них хоть раз реально подключились к VPN"), num: true,
+      sort: (r) => r.connected_share,
+      cell: (r) => heat(r.connected_share, peakConnected, both(r.connected, r.connected_share)) },
+    { title: th("Пробных", "Сколько человек когорты получили пробный период"), num: true,
+      sort: (r) => r.trials, cell: (r) => fmtInt(r.trials) },
+    { title: th("Купили", "Оплатили уже после того, как получили пробный"), num: true,
+      sort: (r) => r.paid, cell: (r) => fmtInt(r.paid) },
+    { title: th("Конверсия", "Купившие после пробного, делённые на получивших пробный"), num: true,
+      sort: (r) => r.conversion,
+      cell: (r) => heat(r.conversion, peakConversion, percent(r.conversion)) },
+    { title: th("Выручка", "Все успешные платежи людей когорты за всё время"), num: true,
+      sort: (r) => r.revenue, cell: (r) => r.revenue ? fmtMoney(r.revenue) : "—" },
+    { title: th("ARPPU", "Выручка когорты на одного заплатившего"), num: true,
+      sort: (r) => r.arppu, cell: (r) => r.arppu ? fmtMoney(r.arppu) : "—" },
+    { title: th("Ср. чек", "Выручка когорты, делённая на число платежей"), num: true,
+      sort: (r) => r.avg_check, cell: (r) => r.avg_check ? fmtMoney(r.avg_check) : "—" },
+    { title: th("Дней до оплаты", "Медиана: сколько дней проходит от регистрации до первого платежа"),
+      num: true, sort: (r) => r.days_to_pay,
+      cell: (r) => r.days_to_pay === null ? "—" : fmtInt(r.days_to_pay) },
+    { title: th("Платят снова", "Доля заплативших, у кого платежей больше одного"), num: true,
+      sort: (r) => r.repeat_share, cell: (r) => percent(r.repeat_share) },
+    { title: th("Активны сейчас", "Подписка ещё не истекла И человек хоть раз подключался"), num: true,
+      sort: (r) => r.active_share,
+      cell: (r) => heat(r.active_share, peakActive, both(r.active, r.active_share)) },
+    { title: th("Онлайн за 7 дней", "Были в VPN хотя бы раз за последнюю неделю"), num: true,
+      sort: (r) => r.online_share,
+      cell: (r) => r.online ? both(r.online, r.online_share) : "—" },
+  ], rows, openCohort);
+}
+
+// ─── активность по дням ───
+let activityData = null;
+
+function drawActivityChips() {
+  $("activityChips").innerHTML = "";
+  Object.entries(ACTIVITY_METRICS).forEach(([key, spec]) => {
+    const el = document.createElement("div");
+    el.className = "chip" + (key === state.activityMetric ? " on" : "");
+    el.textContent = spec.title;
+    el.title = spec.hint;
+    el.onclick = () => { state.activityMetric = key; drawActivityChips(); loadCohorts(); };
+    $("activityChips").append(el);
+  });
+}
+
+function drawActivityChart(series) {
+  activityData = series;
+  const svg = $("activityChart");
+  const W = svg.clientWidth || 900, H = 300;
+  const padL = 72, padR = 14, padT = 14, padB = 30;
+  const w = W - padL - padR, h = H - padT - padB;
+  const values = series.values;
+  const n = values.length;
+  const fmt = (v) => series.format === "bytes" ? fmtSize(v) : fmtInt(v);
+  const ticks = niceTicks(Math.max(...values, 0));
+  const maxY = ticks[ticks.length - 1] || 1;
+  // Столбцы стоят по центрам полос, а не по краям поля: иначе крайние
+  // половинками уезжают за границу svg и обрезаются.
+  const bars = series.kind === "bars";
+  const step = w / Math.max(n, 1);
+  const x = (i) => bars ? padL + step * (i + 0.5)
+                        : (n === 1 ? padL + w / 2 : padL + (w * i) / (n - 1));
+  const half = bars ? step / 2 : (n === 1 ? w / 2 : w / (n - 1) / 2);
+  const y = (v) => padT + h - (h * v) / maxY;
+
+  let out = "";
+  ticks.forEach((t) => {
+    out += '<line class="grid" x1="' + padL + '" y1="' + y(t) + '" x2="' + (W - padR) + '" y2="' + y(t) + '"/>';
+    out += '<text class="axis" x="' + (padL - 8) + '" y="' + (y(t) + 4) + '" text-anchor="end">' + fmt(t) + "</text>";
+  });
+
+  if (n && bars) {
+    // Ширина столбца — от шага, с зазором. Трафик это суточный объём, а не
+    // уровень, и линией он читается хуже: ноль в середине ряда должен быть
+    // виден как пропуск, а не как провал кривой.
+    const width = Math.max(1, step * 0.66);
+    values.forEach((v, i) => {
+      const top = y(v);
+      out += '<rect class="bar" x="' + (x(i) - width / 2) + '" y="' + top +
+             '" width="' + width + '" height="' + Math.max(0, padT + h - top) + '" rx="2"/>';
+    });
+  } else if (n) {
+    const line = values.map((v, i) => (i ? "L" : "M") + x(i) + " " + y(v)).join(" ");
+    out += '<path class="area" d="' + line + " L" + x(n - 1) + " " + y(0) + " L" + x(0) + " " + y(0) + ' Z"/>';
+    out += '<path class="ln" d="' + line + '"/>';
+    if (n <= 60) values.forEach((v, i) => {
+      out += '<circle class="dot" cx="' + x(i) + '" cy="' + y(v) + '" r="3"/>';
+    });
+  }
+
+  const every = Math.max(1, Math.ceil(n / 12));
+  series.labels.forEach((label, i) => {
+    if (i % every === 0 || i === n - 1) {
+      out += '<text class="axis" x="' + x(i) + '" y="' + (H - 8) + '" text-anchor="middle">' + label + "</text>";
+    }
+  });
+  values.forEach((v, i) => {
+    out += '<rect class="hit" data-i="' + i + '" x="' + (x(i) - half) + '" y="' + padT +
+           '" width="' + (half * 2) + '" height="' + h + '"/>';
+  });
+  svg.innerHTML = out;
+
+  svg.querySelectorAll("rect.hit").forEach((r) => {
+    r.onmouseenter = () => {
+      const i = +r.dataset.i;
+      const tip = $("activityTip");
+      tip.innerHTML = "<b>" + fmt(values[i]) + "</b><i>" + series.labels[i] + "</i>";
+      tip.style.opacity = 1;
+      const box = svg.getBoundingClientRect();
+      tip.style.left = Math.min(Math.max(x(i) - 40, 0), box.width - 140) + "px";
+      tip.style.top = Math.max(y(values[i]) - 56, 0) + "px";
+    };
+  });
+  svg.onmouseleave = () => { $("activityTip").style.opacity = 0; };
+}
+
+async function loadCohorts() {
+  const data = await api("/dash/api/cohorts/", {
+    weeks: state.weeks, activity_metric: state.activityMetric,
+  });
+  if (!data) return;
+  drawCohortTable(data.rows);
+  drawCards($("activityCards"), data.cards, state.activityMetric, (metric) => {
+    state.activityMetric = metric; drawActivityChips(); loadCohorts();
+  });
+  $("activityTitle").textContent = data.series.title;
+  $("activitySub").textContent = data.series.hint + " Всегда по суткам, за выбранный в шапке диапазон." +
+    // Длинный кастомный диапазон обрезается слева — молчать об этом нельзя,
+    // иначе график выглядит как «данных раньше не было».
+    (data.series.clipped ? " Показаны последние " + data.series.values.length + " дней диапазона." : "");
+  drawActivityChart(data.series);
+}
+
+const weeksLabel = (n) => n + (n % 10 === 1 && n % 100 !== 11 ? " неделя"
+  : [2, 3, 4].includes(n % 10) && ![12, 13, 14].includes(n % 100) ? " недели" : " недель");
+
+COHORT_WEEKS.forEach((n) => {
+  const option = document.createElement("option");
+  option.value = n;
+  option.textContent = "Последние " + weeksLabel(n);
+  $("cohortWeeks").append(option);
+});
+$("cohortWeeks").value = state.weeks;
+$("cohortWeeks").onchange = (e) => { state.weeks = e.target.value; loadCohorts(); };
+
 // ─── карточка ───
 async function openUser(id) {
   const res = await fetch("/dash/api/users/" + id + "/", { credentials: "same-origin" });
@@ -790,14 +1033,18 @@ async function reload() {
   $("to").value = data.period.to;
   $("granularity").value = data.period.granularity;
   state.granularity = data.period.granularity;
-  drawCards(data.cards);
+  drawCards($("cards"), data.cards, state.metric, (metric) => {
+    state.metric = metric; state.day = ""; reload();
+  });
   drawChart(data.series);
   loadPayments();
+  loadCohorts();
   loadTunnels();
   loadUsers();
 }
 $("discountFilter").onchange = (e) => { state.discount = e.target.value; loadUsers(); };
 drawSegments();
+drawActivityChips();
 reload();
 </script>
 </body>

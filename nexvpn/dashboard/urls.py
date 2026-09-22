@@ -8,5 +8,6 @@ urlpatterns = [
     path("api/payments/", views.payments),
     path("api/users/", views.users),
     path("api/tunnels/", views.tunnels),
+    path("api/cohorts/", views.cohorts),
     path("api/users/<int:user_id>/", views.user_card),
 ]

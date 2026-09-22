@@ -55,6 +55,9 @@ def page(request):
             "presets": json.dumps(list(periods.PRESETS.keys())),
             "segments": json.dumps(queries.SEGMENTS),
             "metrics": json.dumps(queries.SERIES_METRICS),
+            "activity_metrics": json.dumps(queries.ACTIVITY_METRICS),
+            "cohort_weeks": json.dumps(queries.COHORT_WEEK_CHOICES),
+            "cohort_weeks_default": queries.DEFAULT_COHORT_WEEKS,
         },
     )
 
@@ -126,6 +129,31 @@ def tunnels(request):
             "operators": queries.operators(period),
             "matrix": queries.operator_tunnel_matrix(period),
             "series": queries.tunnel_series(period, metric),
+        }
+    )
+
+
+@_staff_api
+def cohorts(request):
+    """Когорты и активность одним запросом: таблица и график читаются вместе.
+
+    Число недель приходит отдельным параметром, а не берётся из периода в
+    шапке: выручка и удержание когорты считаются за всё её время жизни, и
+    привязывать глубину таблицы к выбранным датам значило бы врать подписями.
+    """
+    period = periods.parse(request.GET)
+    try:
+        weeks = int(request.GET.get("weeks", queries.DEFAULT_COHORT_WEEKS))
+    except (TypeError, ValueError):
+        weeks = queries.DEFAULT_COHORT_WEEKS
+    metric = request.GET.get("activity_metric", "active")
+    return JsonResponse(
+        {
+            # Сколько недель реально показано: запрошенное число могли подрезать.
+            "weeks": len(queries.cohort_weeks(weeks)),
+            "rows": queries.cohorts(weeks),
+            "cards": queries.activity_cards(period),
+            "series": queries.activity_series(period, metric),
         }
     )
 

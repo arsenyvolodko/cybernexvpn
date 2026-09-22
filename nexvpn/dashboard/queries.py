@@ -19,7 +19,8 @@ from __future__ import annotations
 import datetime as dt
 import logging
 
-from django.db.models import Count, F, Q, Sum
+from django.db.models import Count, F, Max, Min, Q, Sum
+from django.db.models.functions import TruncDay, TruncWeek
 from django.utils import timezone
 
 from nexvpn.enums.subscription_event_reason_enum import SubscriptionEventReasonEnum
@@ -29,13 +30,14 @@ from nexvpn.models import (
     RelayNetworkDay,
     NexUser,
     NodeUsageDay,
+    PanelPresence,
     Payment,
     Subscription,
     SubscriptionEvent,
     UserInvitation,
 )
 
-from .periods import Period
+from .periods import MAX_BUCKETS, Period
 
 logger = logging.getLogger(__name__)
 
@@ -788,3 +790,421 @@ def operator_tunnel_matrix(period: Period, limit: int = 12) -> dict:
             for operator in operator_order
         ],
     }
+
+
+# ─────────────────────────────── когорты ───────────────────────────────
+
+# Когорта — неделя, в которую человек появился в базе. Неделя, а не день:
+# по дню когорты слишком мелкие, чтобы конверсия в них хоть что-то значила
+# (два человека из пяти — это не 40 %, это случайность), а месяц слишком
+# грубый, чтобы заметить последствия выката.
+
+# Сколько недель показывать. Меньше четырёх сравнивать не с чем, больше года
+# бессмысленно: продукт за год меняется сильнее, чем поведение когорты.
+COHORT_WEEK_CHOICES = [4, 8, 12, 26, 52]
+DEFAULT_COHORT_WEEKS = 12
+
+# «Недавно был онлайн» для колонки удержания. Неделя, как и в сегменте
+# «Активные за неделю», — чтобы две цифры на странице значили одно и то же.
+RETENTION_WINDOW = dt.timedelta(days=7)
+
+
+def cohort_weeks(weeks: int = DEFAULT_COHORT_WEEKS) -> list[dt.date]:
+    """Понедельники показываемых недель, от старой к новой.
+
+    Считаем от сегодняшнего локального дня: текущая неделя тоже когорта, просто
+    неполная, и прятать её нельзя — именно по ней смотрят, как зашёл выкат.
+    """
+    weeks = max(1, min(int(weeks), 52))
+    today = timezone.localdate()
+    monday = today - dt.timedelta(days=today.weekday())
+    return [monday - dt.timedelta(days=7 * offset) for offset in range(weeks - 1, -1, -1)]
+
+
+def cohorts(weeks: int = DEFAULT_COHORT_WEEKS) -> list[dict]:
+    """Таблица когорт: новичок за новичком, от свежей недели к старой.
+
+    Три запроса на всю таблицу, а не по запросу на когорту: неделя приклеивается
+    к строке прямо в базе (`TruncWeek` по `created_at` пользователя), а по
+    Python раскладывается уже готовый агрегат.
+
+    Выручка и удержание считаются за всё время жизни когорты, а не за выбранный
+    период: когорта на то и когорта, что её меряют «сколько принесли с тех пор
+    как пришли». Поэтому верхний выбор дат на эту таблицу не влияет.
+    """
+    tz = timezone.get_current_timezone()
+    moment = timezone.now()
+    mondays = cohort_weeks(weeks)
+    start = timezone.make_aware(dt.datetime.combine(mondays[0], dt.time.min), tz)
+
+    basic = {
+        _local_date(row["cohort"]): row
+        for row in NexUser.objects.filter(created_at__gte=start)
+        .annotate(cohort=TruncWeek("created_at", tzinfo=tz))
+        .values("cohort")
+        .annotate(
+            users=Count("id"),
+            connected=Count("id", filter=Q(presence__first_connected_at__isnull=False)),
+            # «Активен» здесь то же самое, что в сегментах: подписка жива И
+            # человек хоть раз подключался. Без второй половины в удержание
+            # попадают те, кому дни просто начислили.
+            active=Count(
+                "id",
+                filter=Q(
+                    subscription__expires_at__gt=moment,
+                    presence__first_connected_at__isnull=False,
+                ),
+            ),
+            online=Count("id", filter=Q(presence__online_at__gte=moment - RETENTION_WINDOW)),
+        )
+    }
+
+    trials, converted = _cohort_trials(start, tz)
+    money = _cohort_money(start, tz)
+
+    rows = []
+    for monday in reversed(mondays):
+        counts = basic.get(monday, {})
+        users = counts.get("users", 0)
+        wallet = money.get(monday, {})
+        payers = wallet.get("payers", 0)
+        revenue = wallet.get("revenue", 0)
+        cohort_trials = trials.get(monday, 0)
+        paid = converted.get(monday, 0)
+        rows.append({
+            "week": monday.isoformat(),
+            "label": _week_label(monday),
+            "users": users,
+            "connected": counts.get("connected", 0),
+            "connected_share": _share(counts.get("connected", 0), users),
+            "trials": cohort_trials,
+            "paid": paid,
+            # Знаменатель — получившие пробный, а не вся когорта: легаси и те,
+            # кто до пробного не дошёл, конверсию не портят, их там и не было.
+            "conversion": _share(paid, cohort_trials),
+            "payers": payers,
+            "payments": wallet.get("payments", 0),
+            "revenue": revenue,
+            "arppu": round(revenue / payers) if payers else None,
+            "avg_check": round(revenue / wallet["payments"]) if wallet.get("payments") else None,
+            "days_to_pay": wallet.get("days_to_pay"),
+            "repeat_share": _share(wallet.get("repeat", 0), payers),
+            "active": counts.get("active", 0),
+            "active_share": _share(counts.get("active", 0), users),
+            "online": counts.get("online", 0),
+            "online_share": _share(counts.get("online", 0), users),
+            # Неделя ещё идёт — её цифры заведомо неполные, и фронт это подписывает.
+            "partial": monday == mondays[-1],
+        })
+    return rows
+
+
+def _cohort_trials(start: dt.datetime, tz) -> tuple[dict[dt.date, int], dict[dt.date, int]]:
+    """Сколько в когорте получили пробный и сколько из них потом купили.
+
+    «Потом» — буквально: покупка должна быть позже выдачи пробного. Сравниваем
+    с последней покупкой (`Max`), а не с первой: у легаси бывает оплата
+    задолго до того, как им выдали пробный при переносе, и по первой покупке
+    такой человек выглядел бы как «не конвертировался».
+    """
+    rows = (
+        SubscriptionEvent.objects.filter(
+            user__created_at__gte=start,
+            reason__in=[SubscriptionEventReasonEnum.TRIAL, SubscriptionEventReasonEnum.PURCHASE],
+        )
+        .annotate(cohort=TruncWeek("user__created_at", tzinfo=tz))
+        .values("user_id", "cohort")
+        .annotate(
+            trial_at=Min("created_at", filter=Q(reason=SubscriptionEventReasonEnum.TRIAL)),
+            purchase_at=Max("created_at", filter=Q(reason=SubscriptionEventReasonEnum.PURCHASE)),
+        )
+    )
+    trials: dict[dt.date, int] = {}
+    converted: dict[dt.date, int] = {}
+    for row in rows:
+        if row["trial_at"] is None:
+            continue
+        week = _local_date(row["cohort"])
+        trials[week] = trials.get(week, 0) + 1
+        if row["purchase_at"] is not None and row["purchase_at"] > row["trial_at"]:
+            converted[week] = converted.get(week, 0) + 1
+    return trials, converted
+
+
+def _cohort_money(start: dt.datetime, tz) -> dict[dt.date, dict]:
+    """Деньги когорты: выручка, платежи, платящие, повторные оплаты, скорость.
+
+    Считаем по успешным платежам (`processed_at`), а не по событиям подписки:
+    дни начисляют и промокоды, и админ, а деньги — только оплата.
+    """
+    rows = (
+        Payment.objects.filter(processed_at__isnull=False, user__created_at__gte=start)
+        .annotate(cohort=TruncWeek("user__created_at", tzinfo=tz))
+        .values("user_id", "cohort", "user__created_at")
+        .annotate(total=Sum("amount"), payments=Count("uuid"), first_at=Min("processed_at"))
+    )
+    money: dict[dt.date, dict] = {}
+    lags: dict[dt.date, list[int]] = {}
+    for row in rows:
+        week = _local_date(row["cohort"])
+        wallet = money.setdefault(week, {"revenue": 0, "payments": 0, "payers": 0, "repeat": 0})
+        wallet["revenue"] += row["total"] or 0
+        wallet["payments"] += row["payments"]
+        wallet["payers"] += 1
+        if row["payments"] > 1:
+            wallet["repeat"] += 1
+        lag = (row["first_at"] - row["user__created_at"]).days
+        lags.setdefault(week, []).append(max(lag, 0))
+    for week, values in lags.items():
+        # Медиана, а не среднее: один человек, заплативший через полгода,
+        # сдвигает среднее так, что по нему уже ничего не решишь.
+        money[week]["days_to_pay"] = _median(values)
+    return money
+
+
+def _week_label(monday: dt.date) -> str:
+    """Подпись недели: «14.09 — 20.09». Год не пишем — он виден по порядку строк."""
+    return f"{monday:%d.%m} — {monday + dt.timedelta(days=6):%d.%m}"
+
+
+def _share(part: int, whole: int) -> int | None:
+    """Доля в процентах. Нет знаменателя — нет и доли: ноль тут соврал бы."""
+    if not whole:
+        return None
+    return round(100 * part / whole)
+
+
+def _median(values: list[int]) -> int | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return round((ordered[middle - 1] + ordered[middle]) / 2)
+
+
+def _local_date(value) -> dt.date:
+    """Дата из результата `Trunc`: в базе это datetime в UTC."""
+    if isinstance(value, dt.datetime):
+        return timezone.localtime(value).date()
+    return value
+
+
+# ─────────────────────── активность по дням ───────────────────────
+
+# Ряды этого раздела всегда по суткам, какая бы детализация ни стояла в шапке.
+# «Активных за неделю» нельзя получить сложением семи дневных чисел: один и тот
+# же человек попал бы в сумму семь раз. Считать честно по неделям мы умеем, но
+# тогда «не подключались больше суток» теряет смысл — метрика-то про сутки.
+ACTIVITY_METRICS = {
+    "active": {
+        "title": "Активных за день",
+        "hint": "Сколько разных людей прокачали хоть сколько-то трафика за сутки.",
+        "kind": "line",
+        "format": "int",
+    },
+    "new_connected": {
+        "title": "Впервые подключились",
+        "hint": "Первое в жизни подключение к VPN. Человек дошёл от «завёл подписку» до «работает».",
+        "kind": "line",
+        "format": "int",
+    },
+    "traffic": {
+        "title": "Трафик за день",
+        "hint": "Сумма по всем нодам за сутки.",
+        "kind": "bars",
+        "format": "bytes",
+    },
+    "traffic_per_user": {
+        "title": "Трафик на активного",
+        "hint": "Трафик за сутки, делённый на число активных в этот день. Резкое падение при том же числе людей — признак, что кому-то не работает.",
+        "kind": "bars",
+        "format": "bytes",
+    },
+    "silent": {
+        "title": "Молчат больше суток",
+        "hint": "Были онлайн на прошлой неделе, но за эти сутки не подключались ни разу. Ранний признак, что человек уходит.",
+        "kind": "line",
+        "format": "int",
+    },
+}
+
+# Сколько дней подряд считать «вчера ещё пользовался» для «молчунов».
+SILENCE_LOOKBACK = 7
+
+
+def activity_period(period: Period) -> Period:
+    """Тот же отрезок, но всегда по суткам и не длиннее, чем влезает в график.
+
+    Длинный кастомный диапазон обрезаем слева, а не укрупняем: «активных за
+    день» при укрупнении пришлось бы либо складывать людей по разу за каждый
+    день, либо молча подменить метрику. Лучше показать меньше дней честно.
+    """
+    date_from = max(period.date_from, period.date_to - dt.timedelta(days=MAX_BUCKETS - 1))
+    return Period(date_from, period.date_to, "day")
+
+
+def activity_series(period: Period, metric: str) -> dict:
+    """Ряд выбранной метрики по суткам, включая дни без данных."""
+    if metric not in ACTIVITY_METRICS:
+        metric = "active"
+    daily = activity_period(period)
+    days = daily.buckets()
+
+    if metric == "new_connected":
+        values = _first_connections(daily, days)
+    elif metric == "silent":
+        values = _silent(daily, days)
+    else:
+        active = _active_by_day(daily)
+        traffic = _traffic_by_day(daily)
+        if metric == "active":
+            values = [active.get(day, 0) for day in days]
+        elif metric == "traffic":
+            values = [traffic.get(day, 0) for day in days]
+        else:
+            # День без единого активного — это не деление на ноль, а просто ноль:
+            # трафика в такой день тоже нет.
+            values = [
+                round(traffic.get(day, 0) / active[day]) if active.get(day) else 0
+                for day in days
+            ]
+
+    spec = ACTIVITY_METRICS[metric]
+    return {
+        "metric": metric,
+        "title": spec["title"],
+        "hint": spec["hint"],
+        "kind": spec["kind"],
+        "format": spec["format"],
+        "labels": [daily.label(day) for day in days],
+        "dates": [day.isoformat() for day in days],
+        "values": values,
+        "from": daily.date_from.isoformat(),
+        "to": daily.date_to.isoformat(),
+        # Диапазон обрезан слева — фронт обязан сказать об этом вслух.
+        "clipped": daily.date_from != period.date_from,
+    }
+
+
+def activity_cards(period: Period) -> list[dict]:
+    """Плитки над графиком активности. Первые три — за период, последняя — на сейчас."""
+    daily = activity_period(period)
+    active = _active_by_day(daily)
+    traffic = _traffic_by_day(daily)
+    days = daily.buckets()
+
+    unique = (
+        NodeUsageDay.objects.filter(date__gte=daily.date_from, date__lte=daily.date_to)
+        .values("user_id")
+        .distinct()
+        .count()
+    )
+    total_traffic = sum(traffic.values())
+    average = round(sum(active.get(day, 0) for day in days) / len(days)) if days else 0
+
+    moment = timezone.now()
+    silent_now = NexUser.objects.filter(
+        presence__first_connected_at__isnull=False,
+        presence__online_at__lt=moment - dt.timedelta(days=1),
+        subscription__expires_at__gt=moment,
+    ).count()
+
+    return [
+        {
+            "key": "unique",
+            "title": "Пользовались за период",
+            "value": unique,
+            "format": "int",
+            "hint": "Разных людей с трафиком за выбранный период. Человек считается один раз, сколько бы дней ни выходил.",
+        },
+        {
+            "key": "dau",
+            "metric": "active",
+            "title": "Активных в день",
+            "value": average,
+            "format": "int",
+            "hint": "Среднее число людей с трафиком за сутки по дням периода.",
+        },
+        {
+            "key": "traffic",
+            "metric": "traffic",
+            "title": "Трафик за период",
+            "value": total_traffic,
+            "format": "bytes",
+            "hint": "Сумма трафика по всем нодам за период.",
+        },
+        {
+            "key": "silent",
+            "title": "Не подключались сутки",
+            "value": silent_now,
+            "format": "int",
+            "hint": "Прямо сейчас: подписка жива, VPN когда-то работал, а последний онлайн был больше суток назад.",
+        },
+    ]
+
+
+def _active_by_day(period: Period) -> dict[dt.date, int]:
+    """Сколько разных людей было с трафиком в каждые сутки."""
+    return {
+        row["date"]: row["people"]
+        for row in NodeUsageDay.objects.filter(
+            date__gte=period.date_from, date__lte=period.date_to
+        )
+        .values("date")
+        .annotate(people=Count("user_id", distinct=True))
+    }
+
+
+def _traffic_by_day(period: Period) -> dict[dt.date, int]:
+    return {
+        row["date"]: row["total"] or 0
+        for row in NodeUsageDay.objects.filter(
+            date__gte=period.date_from, date__lte=period.date_to
+        )
+        .values("date")
+        .annotate(total=Sum("bytes"))
+    }
+
+
+def _first_connections(period: Period, days: list[dt.date]) -> list[int]:
+    """Первые в жизни подключения по суткам — по отметке панели."""
+    tz = timezone.get_current_timezone()
+    rows = (
+        PanelPresence.objects.filter(
+            first_connected_at__gte=period.start, first_connected_at__lt=period.end
+        )
+        .annotate(day=TruncDay("first_connected_at", tzinfo=tz))
+        .values("day")
+        .annotate(people=Count("user_id"))
+    )
+    by_day = {_local_date(row["day"]): row["people"] for row in rows}
+    return [by_day.get(day, 0) for day in days]
+
+
+def _silent(period: Period, days: list[dt.date]) -> list[int]:
+    """Кто пользовался на прошлой неделе, но за эти сутки не вышел.
+
+    Историю «последнего онлайна» мы не храним: `PanelPresence` перезаписывается,
+    и на позапрошлый вторник в нём ничего нет. Зато посуточный трафик хранится —
+    по нему молчание и восстанавливается. Цифра на сегодня из плитки над
+    графиком и точка ряда за сегодня поэтому чуть разойдутся: плитка знает
+    точное время последнего онлайна, ряд — только «были за сутки сообщения».
+    """
+    pairs = NodeUsageDay.objects.filter(
+        date__gte=period.date_from - dt.timedelta(days=SILENCE_LOOKBACK),
+        date__lte=period.date_to,
+    ).values_list("date", "user_id")
+
+    by_day: dict[dt.date, set[int]] = {}
+    for day, user_id in pairs:
+        by_day.setdefault(day, set()).add(user_id)
+
+    values = []
+    for day in days:
+        recent: set[int] = set()
+        for back in range(1, SILENCE_LOOKBACK + 1):
+            recent |= by_day.get(day - dt.timedelta(days=back), set())
+        values.append(len(recent - by_day.get(day, set())))
+    return values
