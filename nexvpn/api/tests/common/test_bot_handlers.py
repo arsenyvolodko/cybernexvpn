@@ -226,6 +226,18 @@ def test_every_back_button_has_the_icon():
     assert {b.icon_custom_emoji_id for b in backs} == {"5352759161945867747"}
 
 
+def test_renew_buttons_show_price_per_month():
+    from bot.keyboards import keyboards
+    from bot.services import PeriodOption
+
+    options = [
+        PeriodOption(months=1, price=400, saving=0, discount_percent=0),
+        PeriodOption(months=12, price=3600, saving=1200, discount_percent=25),
+    ]
+    labels = [row[0].text for row in keyboards.renew(options).inline_keyboard[:2]]
+    assert labels == ["1 мес. — 400₽", "12 мес. — 3600₽ (300₽/мес)"]
+
+
 def test_the_screen_text_names_the_button_that_exists():
     """Текст просит «нажми ...» — имя должно совпадать с кнопкой на экране."""
     from bot import texts

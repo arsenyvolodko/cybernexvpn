@@ -26,7 +26,7 @@ from django.utils.timezone import localtime, now
 
 from bot import texts
 from bot.broadcast import menu_keyboard
-from bot.handlers.common import render
+from bot.handlers.common import from_admin, render
 from bot.keyboards import ButtonsStorage, keyboards
 from bot.keyboards.factories import DiscountCallback, DiscountReviewCallback
 from bot.services import (
@@ -182,7 +182,7 @@ async def handle_discount_proof(message: Message, user: NexUser, state: FSMConte
 # --- решение администратора ---
 
 
-@router.callback_query(DiscountReviewCallback.filter(), F.from_user.id == settings.TG_ADMIN_USER_ID)
+@router.callback_query(DiscountReviewCallback.filter(), from_admin)
 async def handle_discount_review(call: CallbackQuery, callback_data: DiscountReviewCallback) -> None:
     request = await decide_discount_request(callback_data.request_id, callback_data.approve)
     if request is None:

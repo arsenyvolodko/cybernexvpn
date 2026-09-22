@@ -361,12 +361,15 @@ def reminder(*, with_devices: bool = False) -> InlineKeyboardMarkup:
 
 
 def _renew_buttons(options) -> list[InlineKeyboardButton]:
-    """Сроки со скидкой. Выгода прямо в кнопке — иначе её никто не заметит."""
+    """Сроки продления. В скобках — цена месяца на этом сроке: так выгода
+    длинного срока видна сразу, и цифра та же, что «от N₽/мес» в списке
+    тарифов (там тоже сумма за срок, делённая на месяцы). У месячного срока
+    скобки были бы повтором цены — не пишем."""
     items = []
     for option in options:
         label = f"{option.months} мес. — {option.price}₽"
-        if option.saving:
-            label += f"  (−{option.saving}₽)"
+        if option.months > 1:
+            label += f" ({option.price // option.months}₽/мес)"
         items.append(
             InlineKeyboardButton(text=label, callback_data=RenewCallback(months=option.months).pack())
         )

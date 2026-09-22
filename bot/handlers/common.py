@@ -107,3 +107,16 @@ async def render(
     sent = await _send_screen(message, text, keyboard, photo)
     await try_delete(message)
     return sent.message_id
+
+
+def from_admin(event) -> bool:
+    """Фильтр «пишет администратор».
+
+    Функцией, а не `F.from_user.id == settings.TG_ADMIN_USER_ID`: такое
+    выражение запоминает id один раз при загрузке модуля, и подменить его
+    (в тестах, в другом окружении) уже нельзя.
+    """
+    from django.conf import settings
+
+    user = getattr(event, "from_user", None)
+    return bool(settings.TG_ADMIN_USER_ID) and user is not None and user.id == settings.TG_ADMIN_USER_ID

@@ -20,6 +20,7 @@ from django.utils import timezone
 
 from bot import broadcast as broadcast_service
 from bot import texts
+from bot.handlers.common import from_admin
 from bot.keyboards.factories import BroadcastCallback
 from bot.services import start_test_payment
 from nexvpn.enums import BroadcastAudienceEnum, BroadcastStatusEnum
@@ -31,8 +32,8 @@ router = Router(name="admin")
 
 # Фильтр на весь роутер: чужому эти команды недоступны, причём молча —
 # отвечать «нет прав» значит подтверждать, что команда существует.
-router.message.filter(F.from_user.id == settings.TG_ADMIN_USER_ID)
-router.callback_query.filter(F.from_user.id == settings.TG_ADMIN_USER_ID)
+router.message.filter(from_admin)
+router.callback_query.filter(from_admin)
 
 TEST_AMOUNT = 5
 
