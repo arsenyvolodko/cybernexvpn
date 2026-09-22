@@ -609,9 +609,9 @@ class Discount(models.Model):
 
     @property
     def button_mark(self) -> str:
-        """« -50%✅» для кнопок с ценой. Минус и процент дописываем сами — в поле их можно не писать."""
+        """«-50%✅ » в начало кнопки с ценой. Минус и процент дописываем сами — в поле их можно не писать."""
         value = self.badge.strip().strip("-−%").strip()
-        return f" -{value}%✅" if value else ""
+        return f"-{value}%✅ " if value else ""
 
     @property
     def allowed_user_ids(self) -> list[int]:

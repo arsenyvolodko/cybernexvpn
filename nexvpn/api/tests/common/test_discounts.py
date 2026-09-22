@@ -596,7 +596,7 @@ def test_rejection_does_not_block_a_new_attempt(plans):
 # --- надпись «-N%✅» на кнопках с ценой ---
 
 
-@pytest.mark.parametrize(("badge", "mark"), [("50", " -50%✅"), ("-30%", " -30%✅"), (" 15 ", " -15%✅"), ("", "")])
+@pytest.mark.parametrize(("badge", "mark"), [("50", "-50%✅ "), ("-30%", "-30%✅ "), (" 15 ", "-15%✅ "), ("", "")])
 def test_button_mark_from_badge(badge, mark):
     assert Discount(title="т", badge=badge).button_mark == mark
 
@@ -610,14 +610,14 @@ def test_price_buttons_show_mark_only_for_discounted_plans(plans):
 
     _, renew = async_to_sync(get_renew_options)(sub.user)
     labels = [row[0].text for row in keyboards.renew(renew).inline_keyboard[:-1]]
-    assert labels == ["1 мес. — 75₽ -50%✅", "12 мес. — 720₽ (60₽/мес) -50%✅"]
+    assert labels == ["-50%✅ 1 мес. — 75₽", "-50%✅ 12 мес. — 720₽ (60₽/мес)"]
 
     _, options = async_to_sync(get_plan_options)(sub.user)
     plan_labels = [row[0].text for row in keyboards.plan_list(options).inline_keyboard[:-1]]
-    assert plan_labels == [f"{plans[3].name} — от 160₽/мес -50%✅"]
+    assert plan_labels == [f"-50%✅ {plans[3].name} — от 160₽/мес"]
 
     topup = async_to_sync(get_plan_topup_options)(sub.user, 3)
-    assert all(o.mark == " -50%✅" for o in topup)
+    assert all(o.mark == "-50%✅ " for o in topup)
 
 
 def test_no_mark_without_badge_or_outside_discount(plans):

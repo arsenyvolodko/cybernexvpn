@@ -333,7 +333,7 @@ class PeriodOption:
     price: int
     saving: int
     discount_percent: int
-    mark: str = ""  # « -50%✅», если цена по скидке
+    mark: str = ""  # «-50%✅ » в начале кнопки, если цена по скидке
 
 
 @dataclass
@@ -349,7 +349,7 @@ class PlanOption:
     converted_days: int
     topup_price: int | None
     is_discounted: bool = False  # цена по скидке — тогда под экраном подпись
-    mark: str = ""  # « -50%✅» на кнопке тарифа
+    mark: str = ""  # «-50%✅ » в начале кнопки тарифа
 
 
 @dataclass
@@ -367,7 +367,7 @@ class PlanTopupOption:
     # должен менять цифру, которой мы рекламируем тариф — иначе один и тот же
     # тариф на одном и том же сроке выглядел бы по-разному на двух экранах.
     price_month: int
-    mark: str = ""  # « -50%✅», если цена по скидке
+    mark: str = ""  # «-50%✅ » в начале кнопки, если цена по скидке
 
 
 @sync_to_async
