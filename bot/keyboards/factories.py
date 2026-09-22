@@ -71,3 +71,16 @@ class PollCustomCallback(CallbackData, prefix="pcust"):
     """«Не буду отвечать» под просьбой написать свой вариант в опросе."""
 
     broadcast_id: int
+
+
+class DiscountCallback(CallbackData, prefix="disc"):
+    """Кнопка скидки с подтверждением в разделе «Промокоды и скидки»."""
+
+    discount_id: int
+
+
+class DiscountReviewCallback(CallbackData, prefix="drev"):
+    """«Подтвердить» / «Отклонить» у админа под заявкой на скидку."""
+
+    request_id: int
+    approve: bool

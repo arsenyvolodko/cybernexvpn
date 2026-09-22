@@ -8,7 +8,8 @@ from bot.channel import gate_keyboard, gate_required_for
 from bot.handlers.channel import welcome_text
 from bot.handlers.common import render
 from bot.keyboards import ButtonsStorage, keyboards
-from bot.services import register_referral
+from bot.services import apply_promo_code, register_referral
+from nexvpn.subscription.discounts import parse_start_payload
 from nexvpn.models import NexUser
 
 logger = logging.getLogger(__name__)
@@ -26,9 +27,25 @@ async def handle_start(
     приезжает сюда в аргументе команды. Приглашение засчитываем **до** экрана
     подписки: иначе человек, пришедший по ссылке и сходивший в канал, потерял
     бы её по дороге — параметр в повторном `/start` уже не приедет.
+
+    С промокодом ссылка — `?start=promo_КОД` или `?start=<id>_promo_КОД`.
+    Промокод применяем тоже до канала и говорим об этом первым сообщением.
     """
     if command.args:
-        await register_referral(user, command.args.strip())
+        referral, code = parse_start_payload(command.args)
+        if referral:
+            await register_referral(user, referral)
+        if code:
+            import html
+
+            result = await apply_promo_code(user, code)
+            if result.discount is not None:
+                text = texts.PROMO_APPLIED_BY_LINK.format(title=html.escape(result.discount.title))
+            elif result.status == "unavailable":
+                text = texts.PROMO_UNAVAILABLE
+            else:
+                text = texts.PROMO_LINK_NOT_FOUND
+            await message.answer(text)
 
     if gate_required_for(user):
         await message.answer(texts.CHANNEL_GATE, reply_markup=gate_keyboard())

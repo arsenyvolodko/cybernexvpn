@@ -29,7 +29,7 @@ from nexvpn.models import (
     UserInvitation,
 )
 from nexvpn.remnawave import RemnawaveError
-from nexvpn.subscription import panel_sync, pricing, service
+from nexvpn.subscription import discounts, panel_sync, pricing, service
 from nexvpn.subscription.service import SubscriptionError
 
 logger = logging.getLogger(__name__)
@@ -347,6 +347,7 @@ class PlanOption:
     is_upgrade: bool
     converted_days: int
     topup_price: int | None
+    is_discounted: bool = False  # цена по скидке — тогда под экраном подпись
 
 
 @dataclass
@@ -378,15 +379,16 @@ def get_renew_options(user: NexUser) -> tuple[Subscription | None, list[PeriodOp
     # старую, более дорогую цену за тариф, от которого человек сам отказался.
     subscription = service.ensure_current_plan(subscription)
     plan = subscription.plan
-    options = [
-        PeriodOption(
+    base = discounts.book_for(user).price_month(plan)
+    options = []
+    for period in BillingPeriod.objects.filter(is_active=True):
+        price = pricing.period_price(base, period.months, period.discount_percent)
+        options.append(PeriodOption(
             months=period.months,
-            price=period.price_for(plan),
-            saving=period.saving_for(plan),
+            price=price,
+            saving=base * period.months - price,
             discount_percent=period.discount_percent,
-        )
-        for period in BillingPeriod.objects.filter(is_active=True)
-    ]
+        ))
     return subscription, options
 
 
@@ -400,27 +402,39 @@ def get_plan_options(user: NexUser) -> tuple[Subscription | None, list[PlanOptio
 
     days_left = subscription.days_left
     current = subscription.plan
+    book = discounts.book_for(user)
+    # Со скидкой видны только её тарифы. Текущий показываем всё равно: он у
+    # человека уже есть, прятать его из списка значило бы запутать.
+    plans = book.visible_plans()
+    if all(p.pk != current.pk for p in plans) and current.is_active:
+        plans.append(current)
+        plans.sort(key=lambda p: (p.order, p.device_limit))
     # Самый длинный активный срок даёт самую низкую цену месяца — её и
     # показываем в списке как «от», чтобы не звать по полной цене того, кто
     # готов заплатить сразу за год.
     longest_period = BillingPeriod.objects.filter(is_active=True).order_by("-months").first()
     options = []
-    for plan in Plan.objects.filter(is_active=True, is_public=True):
-        quote = pricing.quote_plan_change(days_left, current.price_month, plan.price_month)
+    for plan in plans:
+        price_month = book.price_month(plan)
+        quote = pricing.quote_plan_change(days_left, book.price_month(current), price_month)
         min_price_month = (
-            longest_period.price_for(plan) // longest_period.months
-            if longest_period else plan.price_month
+            pricing.period_price(price_month, longest_period.months, longest_period.discount_percent)
+            // longest_period.months
+            if longest_period else price_month
         )
         options.append(
             PlanOption(
                 device_limit=plan.device_limit,
                 name=plan.name,
-                price_month=plan.price_month,
+                price_month=price_month,
                 min_price_month=min_price_month,
                 is_current=plan.pk == current.pk,
+                # Повышение или понижение — по каталогу: это про устройства, а
+                # не про то, сколько скидка берёт за каждый из тарифов.
                 is_upgrade=plan.price_month > current.price_month,
                 converted_days=quote.converted_days,
                 topup_price=quote.topup_price,
+                is_discounted=book.is_discounted(plan),
             )
         )
     return subscription, options
@@ -439,16 +453,16 @@ def get_plan_topup_options(user: NexUser, device_limit: int) -> list[PlanTopupOp
     subscription = Subscription.objects.select_related("plan").get(user=user)
     subscription = service.ensure_current_plan(subscription)
     days_left = subscription.days_left
-    current = subscription.plan
+    book = discounts.book_for(user)
+    price_from, price_to = book.price_month(subscription.plan), book.price_month(plan)
     return [
         PlanTopupOption(
             months=period.months,
             price=pricing.topup_price_for_period(
-                days_left, current.price_month, plan.price_month,
-                period.months, period.discount_percent,
+                days_left, price_from, price_to, period.months, period.discount_percent,
             ),
             days=period.days,
-            price_month=period.price_for(plan) // period.months,
+            price_month=pricing.period_price(price_to, period.months, period.discount_percent) // period.months,
         )
         for period in BillingPeriod.objects.filter(is_active=True)
     ]
@@ -484,13 +498,16 @@ def start_renew_payment(user: NexUser, months: int, return_url: str) -> str:
     # получит, а не по тому, с которого уходит.
     subscription = service.ensure_current_plan(subscription)
     period = BillingPeriod.objects.get(months=months, is_active=True)
+    book = discounts.book_for(user)
+    plan = subscription.plan
     created = payments.create_payment(
         user,
-        subscription.plan,
-        amount=period.price_for(subscription.plan),
+        plan,
+        amount=pricing.period_price(book.price_month(plan), period.months, period.discount_percent),
         days=period.days,
         months=period.months,
         return_url=return_url,
+        discount=book.discount if book.is_discounted(plan) else None,
     )
     return created.url, created.payment.pk
 
@@ -503,13 +520,16 @@ def start_plan_change_payment(user: NexUser, device_limit: int, return_url: str,
     экрана: между показом вариантов и нажатием кнопки могло пройти время.
     """
     plan = Plan.objects.get(device_limit=device_limit, is_active=True)
+    book = discounts.book_for(user)
+    if not book.can_choose(plan):
+        raise service.SubscriptionError("Этот тариф сейчас недоступен")
     subscription = Subscription.objects.select_related("plan").get(user=user)
     subscription = service.ensure_current_plan(subscription)
     period = BillingPeriod.objects.filter(months=months, is_active=True).first()
     discount_percent = period.discount_percent if period else 0
     days = period.days if period else pricing.days_in_period()
     price = pricing.topup_price_for_period(
-        subscription.days_left, subscription.plan.price_month, plan.price_month,
+        subscription.days_left, book.price_month(subscription.plan), book.price_month(plan),
         months, discount_percent,
     )
     if price <= 0:
@@ -522,6 +542,8 @@ def start_plan_change_payment(user: NexUser, device_limit: int, return_url: str,
         months=months,
         kind=PaymentKindEnum.PLAN_CHANGE,
         return_url=return_url,
+        # Вебхук сверит доплату по ценам именно этой скидки.
+        discount=book.discount,
     )
     return created.url
 
@@ -711,6 +733,8 @@ def change_plan_free(user: NexUser, device_limit: int) -> Subscription:
     показал бы «перейдёшь с 05.09» с прошедшей датой.
     """
     plan = Plan.objects.get(device_limit=device_limit, is_active=True)
+    if not discounts.book_for(user).can_choose(plan):
+        raise service.SubscriptionError("Этот тариф сейчас недоступен")
     subscription = Subscription.objects.select_related("plan").get(user=user)
     if plan.price_month < subscription.plan.price_month and subscription.is_active:
         result = service.schedule_plan_downgrade(user, plan)
@@ -765,3 +789,92 @@ def remember_payment_screen(payment_uuid, message_id: int | None) -> None:
     if message_id is None:
         return
     Payment.objects.filter(pk=payment_uuid).update(screen_message_id=message_id)
+
+
+# --- скидки и промокоды ---
+
+
+@dataclass
+class PriceView:
+    """Что нужно экрану с ценами: цена месяца по скидке и подпись внизу."""
+
+    book: "discounts.PriceBook"
+
+    def price(self, plan: Plan) -> int:
+        return self.book.price_month(plan)
+
+    def footer(self, *plans: Plan) -> str:
+        """Подпись «цены с учётом скидки» — только если хоть одна цена со скидкой."""
+        return self.footer_if(any(self.book.is_discounted(p) for p in plans if p is not None))
+
+    def footer_if(self, discounted: bool) -> str:
+        import html
+
+        from bot import texts
+
+        discount = self.book.discount
+        if discount is None or not discounted:
+            return ""
+        template = (
+            texts.PRICE_FOOTER_CODE if discount.kind == discount.Kind.CODE else texts.PRICE_FOOTER_DISCOUNT
+        )
+        return template.format(title=html.escape(discount.title))
+
+
+@sync_to_async
+def get_price_view(user: NexUser) -> PriceView:
+    return PriceView(book=discounts.book_for(user))
+
+
+@dataclass
+class PromoScreen:
+    active: "UserDiscount | None"
+    pending: list
+    menu_discounts: list
+
+
+@sync_to_async
+def get_promo_screen(user: NexUser) -> PromoScreen:
+    from nexvpn.models import UserDiscount
+
+    pending = list(
+        UserDiscount.objects.filter(user=user, status=UserDiscount.Status.PENDING).select_related("discount")
+    )
+    return PromoScreen(
+        active=discounts.active_discount(user),
+        pending=[p.discount for p in pending],
+        menu_discounts=discounts.menu_discounts(user),
+    )
+
+
+@sync_to_async
+def apply_promo_code(user: NexUser, raw: str):
+    return discounts.apply_code(user, raw)
+
+
+@sync_to_async
+def get_menu_discount(user: NexUser, discount_id: int):
+    """Скидка с подтверждением по кнопке — если она ещё действует и доступна человеку."""
+    return next((d for d in discounts.menu_discounts(user) if d.pk == discount_id), None)
+
+
+@sync_to_async
+def discount_request_state(user: NexUser, discount) -> str:
+    return discounts.request_state(user, discount)
+
+
+@sync_to_async
+def open_discount_request(user: NexUser, discount):
+    return discounts.open_request(user, discount)
+
+
+@sync_to_async
+def discount_request_is_pending(request_id: int) -> bool:
+    from nexvpn.models import UserDiscount
+
+    return UserDiscount.objects.filter(pk=request_id, status=UserDiscount.Status.PENDING).exists()
+
+
+@sync_to_async
+def decide_discount_request(request_id: int, approve: bool):
+    return discounts.decide(request_id, approve)

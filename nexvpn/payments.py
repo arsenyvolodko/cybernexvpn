@@ -119,6 +119,7 @@ def create_payment(
     months: int = 1,
     kind: str = PaymentKindEnum.PURCHASE,
     return_url: str | None = None,
+    discount=None,
 ) -> CreatedPayment:
     """Создать платёж в YooKassa и записать намерение.
 
@@ -156,6 +157,7 @@ def create_payment(
             plan=plan,
             amount=amount,
             period_months=months,
+            discount=discount,
         )
         Transaction.objects.create(
             user=user,

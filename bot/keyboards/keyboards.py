@@ -6,7 +6,7 @@
 «В меню»: там «Назад» уже не выводит наружу за одно нажатие.
 """
 
-from aiogram.types import CopyTextButton, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.apps_catalog import CATALOG, Platform
 from bot.keyboards.button import Button
@@ -69,6 +69,7 @@ def main_menu() -> InlineKeyboardMarkup:
         ButtonsStorage.CONNECT,
         ButtonsStorage.MY_SUBSCRIPTION,
         ButtonsStorage.REFERRAL,
+        ButtonsStorage.PROMO,
         ButtonsStorage.FAQ_SUPPORT,
     )
 
@@ -225,7 +226,7 @@ def subscription(*, is_active: bool, web_url: str | None, can_add_device: bool) 
         # и подтверждений, которым тут неоткуда взяться.
         items.extend(_expired_actions())
         if web_url:
-            items.append(InlineKeyboardButton(text=ButtonsStorage.WEB_VERSION.text, url=web_url))
+            items.append(ButtonsStorage.WEB_VERSION.get_button(url=web_url))
         return _rows(*items, back_to=MENU)
 
     items.append(ButtonsStorage.CONNECT if can_add_device else None)
@@ -233,7 +234,7 @@ def subscription(*, is_active: bool, web_url: str | None, can_add_device: bool) 
     items.append(ButtonsStorage.CHANGE_PLAN)
     items.append(ButtonsStorage.RENEW)
     if web_url:
-        items.append(InlineKeyboardButton(text=ButtonsStorage.WEB_VERSION.text, url=web_url))
+        items.append(ButtonsStorage.WEB_VERSION.get_button(url=web_url))
     return _rows(*items, back_to=MENU)
 
 
@@ -255,8 +256,7 @@ def devices(device_list, *, can_add: bool) -> InlineKeyboardMarkup:
 
 def device_detail(token: str) -> InlineKeyboardMarkup:
     return _rows(
-        InlineKeyboardButton(
-            text=ButtonsStorage.DELETE_DEVICE.text,
+        ButtonsStorage.DELETE_DEVICE.get_button(
             callback_data=DeviceCallback(token=token, action="delete").pack(),
         ),
         back_to=DEVICES,
@@ -295,8 +295,7 @@ def platform_download(platform: Platform) -> InlineKeyboardMarkup:
     guide = CATALOG[platform]
     return _rows(
         *[InlineKeyboardButton(text=link.text, url=link.url) for link in guide.downloads],
-        InlineKeyboardButton(
-            text=ButtonsStorage.DOWNLOADED.text,
+        ButtonsStorage.DOWNLOADED.get_button(
             callback_data=ConnectCallback(platform=platform.value, step="connect").pack(),
         ),
         back_to=CONNECT,
@@ -310,10 +309,7 @@ def platform_connect(platform: Platform, connect_url: str, subscription_url: str
         # Через get_button, а не руками: иначе объявленный у кнопки стиль
         # (зелёная) до Telegram не доедет.
         ButtonsStorage.ADD_SUBSCRIPTION.get_button(url=connect_url),
-        InlineKeyboardButton(
-            text=ButtonsStorage.COPY_KEY.text,
-            copy_text=CopyTextButton(text=subscription_url),
-        ),
+        ButtonsStorage.COPY_KEY.get_button(copy_text=subscription_url),
         back_to=ConnectCallback(platform=platform.value, step="download").pack(),
     )
 
@@ -448,7 +444,8 @@ def plan_change_topup(device_limit: int, options) -> InlineKeyboardMarkup:
 
 def pay(url: str) -> InlineKeyboardMarkup:
     return _rows(
-        InlineKeyboardButton(text=ButtonsStorage.PAY.text, url=url),
+        # Через get_button: иначе не доезжают ни иконка, ни зелёный цвет.
+        ButtonsStorage.PAY.get_button(url=url),
         back_to=SUBSCRIPTION,
     )
 
@@ -467,3 +464,43 @@ def connected() -> InlineKeyboardMarkup:
 
 def faq_section() -> InlineKeyboardMarkup:
     return only_back(FAQ)
+
+
+# --- промокоды и скидки ---
+
+PROMO = ButtonsStorage.PROMO.callback
+
+
+def promo_menu(menu_discounts) -> InlineKeyboardMarkup:
+    """«Уже есть промокод» и по кнопке на каждую скидку с подтверждением."""
+    from bot.keyboards.factories import DiscountCallback
+
+    return _rows(
+        ButtonsStorage.ENTER_PROMO,
+        *[
+            InlineKeyboardButton(text=d.title, callback_data=DiscountCallback(discount_id=d.pk).pack())
+            for d in menu_discounts
+        ],
+        back_to=MENU,
+    )
+
+
+def back_to_promo() -> InlineKeyboardMarkup:
+    return _rows(back_to=PROMO)
+
+
+def discount_review(request_id: int) -> InlineKeyboardMarkup:
+    from bot.keyboards.factories import DiscountReviewCallback
+
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="Подтвердить",
+            callback_data=DiscountReviewCallback(request_id=request_id, approve=True).pack(),
+            style="success",
+            icon_custom_emoji_id="5206607081334906820",
+        ),
+        InlineKeyboardButton(
+            text="❌ Отклонить",
+            callback_data=DiscountReviewCallback(request_id=request_id, approve=False).pack(),
+        ),
+    ]])

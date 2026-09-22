@@ -24,6 +24,7 @@ from bot.services import (
     device_count,
     get_plan_options,
     get_plan_topup_options,
+    get_price_view,
     get_renew_options,
     plan_change_is_immediate,
     receipt_needs_email,
@@ -65,18 +66,20 @@ async def handle_renew(call: CallbackQuery, user: NexUser) -> None:
         await render(call, texts.SUBSCRIPTION_NONE, keyboards.only_back())
         return
 
+    prices = await get_price_view(user)
     text = texts.RENEW.format(
         plan=texts.plural_devices(subscription.plan.device_limit),
-        price=subscription.plan.price_month,
+        price=prices.price(subscription.plan),
     )
     if subscription.next_plan_id:
         text += texts.RENEW_PLAN_CHANGE_PENDING.format(
             next_plan=texts.plural_devices(subscription.next_plan.device_limit),
-            next_price=subscription.next_plan.price_month,
+            next_price=prices.price(subscription.next_plan),
             until=localtime(subscription.expires_at).strftime("%d.%m.%Y"),
             plan=texts.plural_devices(subscription.plan.device_limit),
-            price=subscription.plan.price_month,
+            price=prices.price(subscription.plan),
         )
+    text += prices.footer(subscription.plan, subscription.next_plan)
 
     await render(call, text, keyboards.renew(options))
 
@@ -115,12 +118,14 @@ async def handle_change_plan(call: CallbackQuery, user: NexUser) -> None:
         await render(call, texts.SUBSCRIPTION_NONE, keyboards.only_back())
         return
 
+    prices = await get_price_view(user)
     await render(
         call,
         texts.CHANGE_PLAN.format(
             plan=texts.plural_devices(subscription.plan.device_limit),
             days_left=texts.plural_days(subscription.days_left),
-        ),
+        )
+        + prices.footer_if(any(o.is_discounted for o in options)),
         keyboards.plan_list(options),
     )
 
@@ -145,6 +150,7 @@ async def handle_plan_details(call: CallbackQuery, callback_data: PlanCallback, 
             current_plan=texts.plural_devices(subscription.plan.device_limit),
             days_left=texts.plural_days(subscription.days_left),
         )
+        text += (await get_price_view(user)).footer_if(option.is_discounted)
         topup_options = await get_plan_topup_options(user, option.device_limit)
         await render(call, text, keyboards.plan_change_topup(option.device_limit, topup_options))
         return
@@ -167,6 +173,7 @@ async def handle_plan_details(call: CallbackQuery, callback_data: PlanCallback, 
             until=subscription.expires_at.strftime("%d.%m.%Y"),
             current=texts.plural_devices(subscription.plan.device_limit),
         )
+    text += (await get_price_view(user)).footer_if(option.is_discounted)
 
     await render(call, text, keyboards.plan_change(option, topup_options))
 

@@ -111,7 +111,7 @@ def test_home_is_the_same_message_the_person_received(expired_subscription):
     call = step("home", expired_subscription)
 
     assert call.message.text == texts.SUBSCRIPTION_ENDED
-    assert labels(call) == ["Продлить подписку", "Сменить тариф 🔄"]
+    assert labels(call) == ["Продлить подписку", "Сменить тариф"]
     # Проверяем не подписи, а куда ведут: подписи были верными и тогда, когда
     # кнопки уходили в общий сценарий.
     assert callbacks(call) == [

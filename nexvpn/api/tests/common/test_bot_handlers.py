@@ -127,6 +127,7 @@ def test_main_menu_buttons_carry_animated_icons():
         "Подключиться": "5411590687663608498",
         "Моя подписка": "5278573677900752088",
         "Реферальная программа": "5203996991054432397",
+        "Промокоды и скидки": None,  # иконку владелец пока не выбрал
         "FAQ и поддержка": "5443038326535759644",
     }
 
@@ -164,6 +165,34 @@ def test_renew_button_carries_its_icon_wherever_it_appears():
     reminder = keyboards.reminder()
     renew = next(b for row in reminder.inline_keyboard for b in row if b.text == "Продлить подписку")
     assert renew.icon_custom_emoji_id == "5267300544094948794"
+
+
+def test_buttons_reach_telegram_with_icons_and_colors():
+    """Каждая из этих кнопок раньше собиралась хотя бы в одном месте руками —
+    и теряла иконку и цвет. Проверяем то, что реально уходит в клавиатурах."""
+    from bot.apps_catalog import Platform
+    from bot.channel import gate_keyboard
+    from bot.keyboards import keyboards
+
+    def flat(markup):
+        return {b.text: b for row in markup.inline_keyboard for b in row}
+
+    sub = flat(keyboards.subscription(is_active=True, can_add_device=True, web_url="https://w"))
+    assert sub["Мои устройства"].icon_custom_emoji_id == "5819062970998590994"
+    assert sub["Сменить тариф"].icon_custom_emoji_id == "6012661228910939253"
+    assert sub["Веб-версия"].icon_custom_emoji_id == "5447410659077661506"
+
+    pay = flat(keyboards.pay("https://pay"))["Перейти к оплате"]
+    assert pay.icon_custom_emoji_id == "5267300544094948794" and pay.style == "success"
+
+    delete = flat(keyboards.device_detail("t"))["Удалить устройство"]
+    assert delete.icon_custom_emoji_id == "5445267414562389170" and delete.style == "danger"
+
+    assert flat(keyboards.platform_download(Platform.IOS))["Скачал"].icon_custom_emoji_id == "5206607081334906820"
+    copy = flat(keyboards.platform_connect(Platform.IOS, "https://c", "https://s"))["Скопировать ключ"]
+    assert copy.icon_custom_emoji_id == "5341492148468465410" and copy.copy_text.text == "https://s"
+    assert flat(keyboards.connected())["Хорошо"].icon_custom_emoji_id == "5287478236027040039"
+    assert flat(gate_keyboard())["Я подписался"].icon_custom_emoji_id == "5206607081334906820"
 
 
 def test_the_screen_text_names_the_button_that_exists():

@@ -28,7 +28,7 @@ from bot import texts
 from bot.handlers.common import render
 from bot.keyboards import keyboards
 from bot.keyboards.factories import ExpiredCallback
-from bot.services import change_plan_free, get_plan_options, get_renew_options
+from bot.services import change_plan_free, get_plan_options, get_price_view, get_renew_options
 from nexvpn.models import NexUser
 from nexvpn.subscription.service import SubscriptionError
 
@@ -43,10 +43,11 @@ async def _renew_screen(call: CallbackQuery, user: NexUser, keyboard_for) -> Non
     if subscription is None or not options:
         await render(call, texts.SUBSCRIPTION_NONE, keyboards.only_back())
         return
+    prices = await get_price_view(user)
     text = texts.RENEW.format(
         plan=texts.plural_devices(subscription.plan.device_limit),
-        price=subscription.plan.price_month,
-    )
+        price=prices.price(subscription.plan),
+    ) + prices.footer(subscription.plan)
     await render(call, text, keyboard_for(options))
 
 
@@ -76,7 +77,9 @@ async def handle_expired_step(
         if subscription is None:
             await render(call, texts.SUBSCRIPTION_NONE, keyboards.only_back())
             return
-        await render(call, texts.CHANGE_PLAN_EXPIRED, keyboards.expired_plans(options))
+        prices = await get_price_view(user)
+        text = texts.CHANGE_PLAN_EXPIRED + prices.footer_if(any(o.is_discounted for o in options))
+        await render(call, text, keyboards.expired_plans(options))
         return
 
     if step == "pick":

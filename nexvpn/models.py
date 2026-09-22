@@ -4,6 +4,7 @@ import uuid
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import models
+from django.db.models.functions import Upper
 from django.utils.timezone import now
 
 from nexvpn.enums import (
@@ -502,6 +503,11 @@ class Payment(models.Model):
     # Экран «Всё готово к оплате»: его правит вебхук, когда деньги дошли.
     # Живёт здесь, потому что правит другой процесс — бот об этом не знает.
     screen_message_id = models.BigIntegerField(null=True, blank=True, default=None)
+    # По какой скидке посчитана сумма. Вебхук сверяет доплату с этими ценами, а
+    # не с текущей скидкой человека: она могла истечь или смениться, пока он платил.
+    discount = models.ForeignKey(
+        "Discount", on_delete=models.SET_NULL, null=True, blank=True, default=None, related_name="payments"
+    )
 
     def __str__(self):
         return f"{self.uuid} — {self.amount}₽"
@@ -516,6 +522,187 @@ class PromoCode(models.Model):
 
     def __str__(self):
         return f"{self.name}: {self.bonus_days} дн."
+
+
+class Discount(models.Model):
+    """Скидка: свои цены на тарифы, пока не истечёт `valid_until`.
+
+    Два вида. **Промокод** — человек вводит код в боте или приходит по ссылке
+    `?start=promo_КОД`. **С подтверждением** — кнопка в разделе «Промокоды и
+    скидки»: человек присылает доказательство (студенческий и т.п.), админ
+    подтверждает в боте.
+
+    Тарифы, которых нет в ценах скидки, человеку со скидкой не показываются.
+    Одновременно у человека действует одна скидка — новая заменяет прежнюю.
+    Название (`title`) и код — разные вещи: название видит человек под ценами.
+    """
+
+    class Kind(models.TextChoices):
+        CODE = "code", "Промокод (ввод кода)"
+        VERIFICATION = "verification", "С подтверждением (заявка → админ)"
+
+    CODE_PATTERN = r"^[A-Za-z0-9]{3,32}$"
+
+    title = models.CharField(
+        max_length=120,
+        verbose_name="Название",
+        help_text="Его видит человек: «Цены отображаются с учетом скидки по промокоду «…»». Это не сам код",
+    )
+    kind = models.CharField(max_length=15, choices=Kind.choices, default=Kind.CODE, verbose_name="Вид")
+    code = models.CharField(
+        max_length=32,
+        blank=True,
+        default="",
+        verbose_name="Код",
+        help_text="Только для промокода: латиница и цифры, 3–32 символа (так работает ссылка). Регистр не важен",
+    )
+    valid_until = models.DateTimeField(verbose_name="Действует до")
+    is_active = models.BooleanField(default=True, verbose_name="Включена")
+    is_public = models.BooleanField(
+        default=True,
+        verbose_name="Доступна всем",
+        help_text="Выключено — применить могут только пользователи из списка id ниже",
+    )
+    user_ids = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="id пользователей",
+        help_text="Для недоступной всем: Telegram id через пробел, запятую или с новой строки",
+    )
+    show_in_menu = models.BooleanField(
+        default=False,
+        verbose_name="Кнопка в «Промокоды и скидки»",
+        help_text="Для скидки с подтверждением: кнопка с её названием в разделе меню",
+    )
+    verification_prompt = models.TextField(
+        blank=True,
+        default="",
+        verbose_name="Что попросить прислать",
+        help_text="Для скидки с подтверждением: текст после нажатия на кнопку",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "скидка / промокод"
+        verbose_name_plural = "Скидки и промокоды"
+        ordering = ("-created_at",)
+        constraints = [
+            models.UniqueConstraint(
+                Upper("code"),
+                condition=~models.Q(code=""),
+                name="unique_discount_code_ci",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.title} ({self.get_kind_display()})"
+
+    @property
+    def allowed_user_ids(self) -> list[int]:
+        import re
+
+        return [int(t) for t in re.split(r"[\s,;]+", self.user_ids.strip()) if t.isdigit()]
+
+    def is_valid(self, at=None) -> bool:
+        return self.is_active and self.valid_until > (at or now())
+
+    def available_to(self, user_id: int) -> bool:
+        return self.is_public or user_id in self.allowed_user_ids
+
+    @property
+    def link(self) -> str:
+        """Ссылка, по которой промокод применится сам. Только для промокода."""
+        if self.kind != self.Kind.CODE or not self.code:
+            return ""
+        return f"{settings.TG_BOT_URL}?start=promo_{self.code}"
+
+    def clean(self):
+        import re
+
+        from django.core.exceptions import ValidationError
+
+        errors = {}
+        if self.kind == self.Kind.CODE:
+            if not re.match(self.CODE_PATTERN, self.code or ""):
+                errors["code"] = "Код: латиница и цифры, от 3 до 32 символов — иначе не сработает ссылка"
+            elif Discount.objects.filter(code__iexact=self.code).exclude(pk=self.pk).exists():
+                errors["code"] = "Такой код уже есть"
+            if self.show_in_menu:
+                errors["show_in_menu"] = "Кнопка в меню — только для скидки с подтверждением"
+        else:
+            if self.code:
+                errors["code"] = "У скидки с подтверждением кода нет — очисти поле"
+            if self.show_in_menu and not self.verification_prompt.strip():
+                errors["verification_prompt"] = "Напиши, что попросить прислать"
+        tokens = [t for t in re.split(r"[\s,;]+", self.user_ids.strip()) if t]
+        if self.is_public and tokens:
+            errors["user_ids"] = "Скидка доступна всем — список id не нужен. Очисти его или сними «Доступна всем»"
+        elif not self.is_public:
+            bad = [t for t in tokens if not t.isdigit()]
+            if bad:
+                errors["user_ids"] = f"Это не id: {', '.join(bad[:5])}"
+            elif not tokens:
+                errors["user_ids"] = "Впиши хотя бы один id или отметь «Доступна всем»"
+            else:
+                ids = self.allowed_user_ids
+                known = set(NexUser.objects.filter(pk__in=ids).values_list("pk", flat=True))
+                unknown = [str(i) for i in ids if i not in known]
+                if unknown:
+                    errors["user_ids"] = f"Таких пользователей нет в базе: {', '.join(unknown[:10])}"
+        if errors:
+            raise ValidationError(errors)
+
+
+class DiscountPrice(models.Model):
+    """Цена тарифа по скидке. Тарифов без строки здесь человек со скидкой не видит."""
+
+    discount = models.ForeignKey(Discount, on_delete=models.CASCADE, related_name="prices")
+    plan = models.ForeignKey(Plan, on_delete=models.CASCADE, verbose_name="Тариф")
+    price_month = models.PositiveIntegerField(verbose_name="Цена за 30 дней, ₽")
+
+    class Meta:
+        verbose_name = "цена по скидке"
+        verbose_name_plural = "Цены по скидке"
+        constraints = [
+            models.UniqueConstraint(fields=["discount", "plan"], name="unique_discount_plan_price")
+        ]
+
+    def __str__(self):
+        return f"{self.plan.name}: {self.price_month}₽"
+
+
+class UserDiscount(models.Model):
+    """Скидка у человека. Действует одна: новая переводит прежнюю в «заменена»."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "На проверке"
+        ACTIVE = "active", "Действует"
+        REJECTED = "rejected", "Отклонена"
+        REPLACED = "replaced", "Заменена другой"
+
+    user = models.ForeignKey(NexUser, on_delete=models.CASCADE, related_name="discounts")
+    discount = models.ForeignKey(Discount, on_delete=models.CASCADE, related_name="holders")
+    status = models.CharField(max_length=15, choices=Status.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(null=True, blank=True, default=None)
+
+    class Meta:
+        verbose_name = "скидка пользователя"
+        verbose_name_plural = "Скидки пользователей"
+        ordering = ("-created_at",)
+        constraints = [
+            # Одна заявка на проверке на скидку: альбом из нескольких фото
+            # приходит пачкой параллельных апдейтов, и без этого заявок было бы
+            # столько же, сколько фото.
+            models.UniqueConstraint(
+                fields=["user", "discount"],
+                condition=models.Q(status="pending"),
+                name="unique_pending_user_discount",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.user_id}: {self.discount.title} — {self.get_status_display()}"
 
 
 class UsedPromoCode(models.Model):

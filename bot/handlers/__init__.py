@@ -10,6 +10,7 @@ from bot.handlers import (
     expired,
     faq,
     menu,
+    promo,
     referral,
     subscription,
     trim,
@@ -35,6 +36,7 @@ def build_router() -> Router:
     root.include_router(devices.router)
     root.include_router(trim.router)
     root.include_router(referral.router)
+    root.include_router(promo.router)
     root.include_router(faq.router)
     root.include_router(support.router)
     root.include_router(broadcast.router)

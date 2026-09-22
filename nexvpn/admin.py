@@ -1,6 +1,7 @@
 import logging
 
 from django.contrib import admin, messages
+from django.forms.models import BaseInlineFormSet
 from django.shortcuts import render
 from django.utils.html import format_html, format_html_join
 
@@ -11,6 +12,8 @@ from nexvpn.models import (
     BillingPeriod,
     Broadcast,
     BroadcastDelivery,
+    Discount,
+    DiscountPrice,
     GlobalSettings,
     InboundUsageDay,
     LegacyMigrationRecord,
@@ -25,6 +28,7 @@ from nexvpn.models import (
     Transaction,
     UsageDashboard,
     UsedPromoCode,
+    UserDiscount,
     UserInvitation,
 )
 
@@ -575,3 +579,85 @@ class BroadcastDeliveryAdmin(admin.ModelAdmin):
     list_filter = ("is_delivered", "broadcast")
     search_fields = ("user__username", "user__pk", "error")
     readonly_fields = tuple(field.name for field in BroadcastDelivery._meta.fields)
+
+
+# --- скидки и промокоды ---
+
+
+class DiscountPriceFormSet(BaseInlineFormSet):
+    """Без цен скидка бессмысленна: человек со скидкой не увидел бы ни одного тарифа."""
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        super().clean()
+        alive = [
+            form for form in self.forms
+            if form.cleaned_data and not form.cleaned_data.get("DELETE")
+        ]
+        if not alive:
+            raise ValidationError(
+                "Добавь хотя бы один тариф с ценой — тарифы без цены человек со скидкой не видит"
+            )
+        for form in alive:
+            if not form.cleaned_data.get("price_month"):
+                raise ValidationError("Цена по скидке должна быть больше нуля")
+
+
+class DiscountPriceInline(admin.TabularInline):
+    model = DiscountPrice
+    formset = DiscountPriceFormSet
+    extra = 0
+    min_num = 1
+    verbose_name = "тариф и цена"
+    verbose_name_plural = "Тарифы и цены по скидке (остальные тарифы человек со скидкой не видит)"
+
+
+@admin.register(Discount)
+class DiscountAdmin(admin.ModelAdmin):
+    list_display = ("title", "kind", "code", "valid_until", "is_active", "is_public", "active_count", "pending_count")
+    list_filter = ("kind", "is_active", "is_public")
+    search_fields = ("title", "code")
+    inlines = (DiscountPriceInline,)
+    readonly_fields = ("link", "active_count", "pending_count", "created_at")
+    fieldsets = (
+        (None, {"fields": ("title", "kind", "valid_until", "is_active")}),
+        ("Промокод", {
+            "fields": ("code", "link"),
+            "description": "Только для вида «Промокод». Ссылка применяет его сама, ещё до подписки на канал.",
+        }),
+        ("Кому доступна", {"fields": ("is_public", "user_ids")}),
+        ("Скидка с подтверждением", {"fields": ("show_in_menu", "verification_prompt")}),
+        ("Статистика", {"fields": ("active_count", "pending_count", "created_at")}),
+    )
+
+    @admin.display(description="Ссылка")
+    def link(self, obj):
+        if obj is None or not obj.link:
+            return "—"
+        return format_html("<code>{}</code>", obj.link)
+
+    @admin.display(description="Действует у")
+    def active_count(self, obj):
+        from django.utils.timezone import now
+
+        if obj is None or not obj.pk:
+            return 0
+        return obj.holders.filter(status=UserDiscount.Status.ACTIVE).count() if obj.valid_until > now() else 0
+
+    @admin.display(description="На проверке")
+    def pending_count(self, obj):
+        if obj is None or not obj.pk:
+            return 0
+        return obj.holders.filter(status=UserDiscount.Status.PENDING).count()
+
+
+@admin.register(UserDiscount)
+class UserDiscountAdmin(admin.ModelAdmin):
+    """Кто какую скидку получил. Подтверждать заявки — кнопками в боте."""
+
+    list_display = ("user", "discount", "status", "created_at", "decided_at")
+    list_filter = ("status", "discount")
+    search_fields = ("user__username", "user__pk")
+    raw_id_fields = ("user",)
+    readonly_fields = ("created_at", "decided_at")

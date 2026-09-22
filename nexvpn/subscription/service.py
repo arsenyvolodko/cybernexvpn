@@ -25,7 +25,7 @@ from nexvpn.models import (
     SubscriptionEvent,
     UserInvitation,
 )
-from nexvpn.subscription import pricing
+from nexvpn.subscription import discounts, pricing
 
 logger = logging.getLogger(__name__)
 
@@ -202,15 +202,18 @@ def purchase_period(
     return subscription
 
 
-def quote_plan_change(user: NexUser, new_plan: Plan) -> pricing.PlanChangeQuote:
+def quote_plan_change(
+    user: NexUser, new_plan: Plan, book: discounts.PriceBook | None = None
+) -> pricing.PlanChangeQuote:
     subscription = Subscription.objects.filter(user=user).select_related("plan").first()
     if subscription is None:
         raise SubscriptionError("У пользователя нет подписки")
     subscription = ensure_current_plan(subscription)
+    book = book or discounts.book_for(user)
     return pricing.quote_plan_change(
         days_left=subscription.days_left,
-        price_from=subscription.plan.price_month,
-        price_to=new_plan.price_month,
+        price_from=book.price_month(subscription.plan),
+        price_to=book.price_month(new_plan),
     )
 
 
@@ -221,6 +224,7 @@ def change_plan_now(
     amount_paid: int = 0,
     payment: Payment | None = None,
     months: int = 1,
+    book: discounts.PriceBook | None = None,
 ) -> Subscription:
     """Немедленный переход на другой тариф с сохранением стоимости остатка.
 
@@ -230,7 +234,14 @@ def change_plan_now(
 
     `months` — на сколько месяцев нового тарифа оплачена доплата (см.
     `Payment.period_months`). При `amount_paid=0` не используется.
+
+    Цены — по скидке. У оплаченного перехода — по той, что записана в
+    платёж: по ней выставлен счёт, а текущая могла за это время истечь.
     """
+    if payment is not None:
+        book = discounts.book_of(payment.discount)
+    elif book is None:
+        book = discounts.book_for(user)
     subscription = Subscription.objects.select_for_update().select_related("plan").filter(user=user).first()
     if subscription is None:
         raise SubscriptionError("У пользователя нет подписки")
@@ -239,7 +250,8 @@ def change_plan_now(
 
     old_plan = subscription.plan
     days_left = subscription.days_left
-    quote = pricing.quote_plan_change(days_left, old_plan.price_month, new_plan.price_month)
+    price_from, price_to = book.price_month(old_plan), book.price_month(new_plan)
+    quote = pricing.quote_plan_change(days_left, price_from, price_to)
 
     converted_days = quote.converted_days
     if amount_paid > 0:
@@ -250,7 +262,7 @@ def change_plan_now(
         period = BillingPeriod.objects.filter(months=months, is_active=True).first()
         discount_percent = period.discount_percent if period else 0
         topup_price = pricing.topup_price_for_period(
-            days_left, old_plan.price_month, new_plan.price_month, months, discount_percent
+            days_left, price_from, price_to, months, discount_percent
         )
         if amount_paid < topup_price:
             raise SubscriptionError(

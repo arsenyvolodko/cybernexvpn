@@ -36,7 +36,8 @@ def gate_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="Перейти в канал 📢", url=settings.TG_CHANNEL_URL)],
             [InlineKeyboardButton(
-                text="Я подписался ✅", callback_data=CHECK_CALLBACK, style="success"
+                text="Я подписался", callback_data=CHECK_CALLBACK, style="success",
+                icon_custom_emoji_id="5206607081334906820",
             )],
         ]
     )

@@ -15,23 +15,27 @@ class ButtonsTextStorage(ABC):
 
     # подключение: и первая кнопка меню, и кнопка внутри подписки — один сценарий
     CONNECT = "Подключиться"
-    MY_DEVICES = "Мои устройства 📱"
-    CHANGE_PLAN = "Сменить тариф 🔄"
+    MY_DEVICES = "Мои устройства"
+    CHANGE_PLAN = "Сменить тариф"
     RENEW = "Продлить подписку"  # эмодзи — анимированная иконка
-    PAY = "Перейти к оплате 💳"
+    PAY = "Перейти к оплате"
     CHANGE_PLAN_FREE = "Перейти бесплатно"
-    WEB_VERSION = "Веб-версия 🌐"
+    WEB_VERSION = "Веб-версия"
 
     # устройства
-    ADD_DEVICE = "Добавить устройство ➕"
-    DELETE_DEVICE = "Удалить устройство 🗑"
+    ADD_DEVICE = "Добавить устройство"
+    DELETE_DEVICE = "Удалить устройство"
     DELETE_DEVICE_CONFIRM = "Да, удалить"
 
     # подключение
-    DOWNLOADED = "Скачал ✅"
+    DOWNLOADED = "Скачал"
     ADD_SUBSCRIPTION = "Подключить ⚡"
-    COPY_KEY = "Скопировать ключ 📋"
-    CONNECT_OK = "Хорошо 👌"
+    COPY_KEY = "Скопировать ключ"
+    CONNECT_OK = "Хорошо"
+
+    # промокоды и скидки
+    PROMO = "Промокоды и скидки"
+    ENTER_PROMO = "Уже есть промокод"
 
     # рефералка и поддержка
     SHARE_REFERRAL = "Поделиться ссылкой"  # эмодзи — анимированная иконка
@@ -52,29 +56,31 @@ class ButtonsStorage(metaclass=AutoNameButtonMeta):
 
     # Зелёная: главное действие бота, ради него сюда и приходят.
     CONNECT = Button(style="success", icon="5411590687663608498")  # молния
-    MY_DEVICES = Button()
-    CHANGE_PLAN = Button()
+    MY_DEVICES = Button(icon="5819062970998590994")
+    CHANGE_PLAN = Button(icon="6012661228910939253")
     # Оплата и продление — тоже деньги в кассу, их тоже выделяем.
     RENEW = Button(style="success", icon="5267300544094948794")
-    PAY = Button(style="success")
+    PAY = Button(style="success", icon="5267300544094948794")
     CHANGE_PLAN_FREE = Button()
-    WEB_VERSION = Button()
+    WEB_VERSION = Button(icon="5447410659077661506")
 
-    ADD_DEVICE = Button()
+    ADD_DEVICE = Button(icon="5393194986252542669")
     # Красные: действие необратимое, пусть отличается от соседей визуально.
-    DELETE_DEVICE = Button(style="danger")
+    DELETE_DEVICE = Button(style="danger", icon="5445267414562389170")
     DELETE_DEVICE_CONFIRM = Button(style="danger")
 
-    DOWNLOADED = Button()
+    DOWNLOADED = Button(icon="5206607081334906820")
     # Зелёная, как «Подключиться» в меню: это то же главное действие, только
     # на шаг ближе — им сценарий подключения и заканчивается.
     ADD_SUBSCRIPTION = Button(style="success")
-    COPY_KEY = Button()
+    COPY_KEY = Button(icon="5341492148468465410")
     # Обычная, не зелёная: зелёным в боте выделены действия, которые чего-то
     # стоят или ведут дальше по сценарию, а это просто «прочитал».
-    CONNECT_OK = Button()
+    CONNECT_OK = Button(icon="5287478236027040039")
 
     SHARE_REFERRAL = Button(icon="5190859184312167965")
+    PROMO = Button()
+    ENTER_PROMO = Button()
     COPY_REFERRAL = Button(icon="5413422358071372326")
     SUPPORT = Button()
 
