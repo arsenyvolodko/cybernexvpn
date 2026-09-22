@@ -554,9 +554,19 @@ class Discount(models.Model):
         blank=True,
         default="",
         verbose_name="Код",
-        help_text="Только для промокода: латиница и цифры, 3–32 символа (так работает ссылка). Регистр не важен",
+        help_text=(
+            "Латиница и цифры, 3–32 символа (так работает ссылка), регистр не важен. У промокода обязателен; "
+            "у скидки с подтверждением — по желанию: с ним скидку можно получить и кодом, и заявкой"
+        ),
     )
     valid_until = models.DateTimeField(verbose_name="Действует до")
+    badge = models.CharField(
+        max_length=10,
+        blank=True,
+        default="",
+        verbose_name="Скидка",
+        help_text="Только для надписи на кнопках с ценой: 50 → «-50%✅». Цены берутся из таблицы ниже. Пусто — без надписи",
+    )
     is_active = models.BooleanField(default=True, verbose_name="Включена")
     is_public = models.BooleanField(
         default=True,
@@ -598,6 +608,12 @@ class Discount(models.Model):
         return f"{self.title} ({self.get_kind_display()})"
 
     @property
+    def button_mark(self) -> str:
+        """« -50%✅» для кнопок с ценой. Минус и процент дописываем сами — в поле их можно не писать."""
+        value = self.badge.strip().strip("-−%").strip()
+        return f" -{value}%✅" if value else ""
+
+    @property
     def allowed_user_ids(self) -> list[int]:
         import re
 
@@ -611,8 +627,8 @@ class Discount(models.Model):
 
     @property
     def link(self) -> str:
-        """Ссылка, по которой промокод применится сам. Только для промокода."""
-        if self.kind != self.Kind.CODE or not self.code:
+        """Ссылка, по которой скидка применится сама. Есть у любой скидки с кодом."""
+        if not self.code:
             return ""
         return f"{settings.TG_BOT_URL}?start=promo_{self.code}"
 
@@ -622,18 +638,18 @@ class Discount(models.Model):
         from django.core.exceptions import ValidationError
 
         errors = {}
-        if self.kind == self.Kind.CODE:
+        # Код обязателен у промокода и необязателен у скидки с подтверждением:
+        # с кодом её можно получить обоими путями — кодом сразу или заявкой.
+        if self.code or self.kind == self.Kind.CODE:
             if not re.match(self.CODE_PATTERN, self.code or ""):
                 errors["code"] = "Код: латиница и цифры, от 3 до 32 символов — иначе не сработает ссылка"
             elif Discount.objects.filter(code__iexact=self.code).exclude(pk=self.pk).exists():
                 errors["code"] = "Такой код уже есть"
+        if self.kind == self.Kind.CODE:
             if self.show_in_menu:
                 errors["show_in_menu"] = "Кнопка в меню — только для скидки с подтверждением"
-        else:
-            if self.code:
-                errors["code"] = "У скидки с подтверждением кода нет — очисти поле"
-            if self.show_in_menu and not self.verification_prompt.strip():
-                errors["verification_prompt"] = "Напиши, что попросить прислать"
+        elif self.show_in_menu and not self.verification_prompt.strip():
+            errors["verification_prompt"] = "Напиши, что попросить прислать"
         tokens = [t for t in re.split(r"[\s,;]+", self.user_ids.strip()) if t]
         if self.is_public and tokens:
             errors["user_ids"] = "Скидка доступна всем — список id не нужен. Очисти его или сними «Доступна всем»"
@@ -680,9 +696,15 @@ class UserDiscount(models.Model):
         REJECTED = "rejected", "Отклонена"
         REPLACED = "replaced", "Заменена другой"
 
+    class Via(models.TextChoices):
+        CODE = "code", "По коду"
+        REQUEST = "request", "По заявке"
+
     user = models.ForeignKey(NexUser, on_delete=models.CASCADE, related_name="discounts")
     discount = models.ForeignKey(Discount, on_delete=models.CASCADE, related_name="holders")
     status = models.CharField(max_length=15, choices=Status.choices)
+    # Как получена: от этого зависит подпись под ценами («по промокоду» или нет).
+    via = models.CharField(max_length=10, choices=Via.choices, default=Via.CODE, verbose_name="Как получена")
     created_at = models.DateTimeField(auto_now_add=True)
     decided_at = models.DateTimeField(null=True, blank=True, default=None)
 

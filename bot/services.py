@@ -333,6 +333,7 @@ class PeriodOption:
     price: int
     saving: int
     discount_percent: int
+    mark: str = ""  # « -50%✅», если цена по скидке
 
 
 @dataclass
@@ -348,6 +349,7 @@ class PlanOption:
     converted_days: int
     topup_price: int | None
     is_discounted: bool = False  # цена по скидке — тогда под экраном подпись
+    mark: str = ""  # « -50%✅» на кнопке тарифа
 
 
 @dataclass
@@ -365,6 +367,7 @@ class PlanTopupOption:
     # должен менять цифру, которой мы рекламируем тариф — иначе один и тот же
     # тариф на одном и том же сроке выглядел бы по-разному на двух экранах.
     price_month: int
+    mark: str = ""  # « -50%✅», если цена по скидке
 
 
 @sync_to_async
@@ -379,7 +382,8 @@ def get_renew_options(user: NexUser) -> tuple[Subscription | None, list[PeriodOp
     # старую, более дорогую цену за тариф, от которого человек сам отказался.
     subscription = service.ensure_current_plan(subscription)
     plan = subscription.plan
-    base = discounts.book_for(user).price_month(plan)
+    book = discounts.book_for(user)
+    base = book.price_month(plan)
     options = []
     for period in BillingPeriod.objects.filter(is_active=True):
         price = pricing.period_price(base, period.months, period.discount_percent)
@@ -388,6 +392,7 @@ def get_renew_options(user: NexUser) -> tuple[Subscription | None, list[PeriodOp
             price=price,
             saving=base * period.months - price,
             discount_percent=period.discount_percent,
+            mark=book.mark(plan),
         ))
     return subscription, options
 
@@ -435,6 +440,7 @@ def get_plan_options(user: NexUser) -> tuple[Subscription | None, list[PlanOptio
                 converted_days=quote.converted_days,
                 topup_price=quote.topup_price,
                 is_discounted=book.is_discounted(plan),
+                mark=book.mark(plan),
             )
         )
     return subscription, options
@@ -463,6 +469,7 @@ def get_plan_topup_options(user: NexUser, device_limit: int) -> list[PlanTopupOp
             ),
             days=period.days,
             price_month=pricing.period_price(price_to, period.months, period.discount_percent) // period.months,
+            mark=book.mark(plan),
         )
         for period in BillingPeriod.objects.filter(is_active=True)
     ]
@@ -815,9 +822,10 @@ class PriceView:
         discount = self.book.discount
         if discount is None or not discounted:
             return ""
-        template = (
-            texts.PRICE_FOOTER_CODE if discount.kind == discount.Kind.CODE else texts.PRICE_FOOTER_DISCOUNT
-        )
+        # «по промокоду» — только если человек получил скидку кодом. Одну и ту
+        # же скидку можно получить и кодом, и заявкой.
+        via = self.book.via or ("code" if discount.kind == discount.Kind.CODE else "request")
+        template = texts.PRICE_FOOTER_CODE if via == "code" else texts.PRICE_FOOTER_DISCOUNT
         return template.format(title=html.escape(discount.title))
 
 

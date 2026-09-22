@@ -33,7 +33,8 @@ def make_discount(prices, *, kind=Discount.Kind.CODE, code="SPRING", **kwargs):
     discount = Discount.objects.create(
         title=kwargs.pop("title", "Весна"),
         kind=kind,
-        code=code if kind == Discount.Kind.CODE else "",
+        # У скидки с подтверждением код по желанию — только если передан явно.
+        code=code if kind == Discount.Kind.CODE else kwargs.pop("verification_code", ""),
         valid_until=kwargs.pop("valid_until", now() + timedelta(days=30)),
         **kwargs,
     )
@@ -312,7 +313,7 @@ def test_student_discount_is_seeded_for_the_menu():
         ({"kind": "code", "code": "a b"}, "code"),
         ({"kind": "code", "code": "ab"}, "code"),
         ({"kind": "code", "code": "SPRING", "show_in_menu": True}, "show_in_menu"),
-        ({"kind": "verification", "code": "X123"}, "code"),
+        ({"kind": "verification", "code": "a b"}, "code"),
         ({"kind": "verification", "show_in_menu": True, "verification_prompt": ""}, "verification_prompt"),
         ({"kind": "code", "code": "SPRING", "is_public": False, "user_ids": ""}, "user_ids"),
         ({"kind": "code", "code": "SPRING", "is_public": True, "user_ids": "123"}, "user_ids"),
@@ -590,3 +591,108 @@ def test_rejection_does_not_block_a_new_attempt(plans):
     assert discounts.request_state(user, student) == "none"
     second, created = discounts.open_request(user, student)
     assert created and second.pk != first.pk
+
+
+# --- надпись «-N%✅» на кнопках с ценой ---
+
+
+@pytest.mark.parametrize(("badge", "mark"), [("50", " -50%✅"), ("-30%", " -30%✅"), (" 15 ", " -15%✅"), ("", "")])
+def test_button_mark_from_badge(badge, mark):
+    assert Discount(title="т", badge=badge).button_mark == mark
+
+
+def test_price_buttons_show_mark_only_for_discounted_plans(plans):
+    from bot.keyboards import keyboards
+    from bot.services import get_plan_options, get_plan_topup_options, get_renew_options
+
+    sub = SubscriptionFactory(plan=plans[1], expires_at=now() + timedelta(days=3))
+    discounts.activate(sub.user, make_discount({plans[1]: 75, plans[3]: 200}, badge="50"))
+
+    _, renew = async_to_sync(get_renew_options)(sub.user)
+    labels = [row[0].text for row in keyboards.renew(renew).inline_keyboard[:-1]]
+    assert labels == ["1 мес. — 75₽ -50%✅", "12 мес. — 720₽ (60₽/мес) -50%✅"]
+
+    _, options = async_to_sync(get_plan_options)(sub.user)
+    plan_labels = [row[0].text for row in keyboards.plan_list(options).inline_keyboard[:-1]]
+    assert plan_labels == [f"{plans[3].name} — от 160₽/мес -50%✅"]
+
+    topup = async_to_sync(get_plan_topup_options)(sub.user, 3)
+    assert all(o.mark == " -50%✅" for o in topup)
+
+
+def test_no_mark_without_badge_or_outside_discount(plans):
+    from bot.services import get_renew_options
+
+    sub = SubscriptionFactory(plan=plans[5])
+    discounts.activate(sub.user, make_discount({plans[1]: 75}, badge="50"))  # текущего тарифа в скидке нет
+
+    _, renew = async_to_sync(get_renew_options)(sub.user)
+    assert {o.mark for o in renew} == {""}
+
+
+def test_cu_discount_is_seeded_and_student_has_badge():
+    cu = Discount.objects.get(title="Скидка для студентов ЦУ -50%")
+    assert cu.kind == Discount.Kind.VERIFICATION and cu.show_in_menu and cu.badge == "50"
+    assert "ЦУ" in cu.verification_prompt
+    assert Discount.objects.get(title="Скидка для студентов 30%").badge == "30"
+
+
+# --- одна скидка: и кодом, и заявкой ---
+
+
+def _both_ways(plans):
+    return make_discount(
+        {plans[1]: 75}, kind=Discount.Kind.VERIFICATION, title="Скидка ЦУ", badge="50",
+        show_in_menu=True, verification_prompt="Пришли студак", verification_code="CU2026",
+    )
+
+
+def test_verification_discount_may_have_a_code(plans, settings):
+    settings.TG_BOT_URL = "https://t.me/CyberNexVpnBot"
+    discount = _both_ways(plans)
+    discount.clean()
+    assert discount.link == "https://t.me/CyberNexVpnBot?start=promo_CU2026"
+
+
+def test_code_gives_verification_discount_at_once_with_promo_footer(plans):
+    from bot.services import PriceView
+
+    user = NexUserFactory()
+    discount = _both_ways(plans)
+
+    result = discounts.apply_code(user, "cu2026")
+
+    assert result.discount == discount
+    held = discounts.active_discount(user)
+    assert held.via == UserDiscount.Via.CODE
+    assert PriceView(book=discounts.book_for(user)).footer(plans[1]).endswith(
+        "по промокоду «Скидка ЦУ»</b>"
+    )
+    assert discounts.request_state(user, discount) == "active", "кнопка скажет «уже действует»"
+
+
+def test_same_discount_by_request_has_plain_footer(plans):
+    from bot.services import PriceView
+
+    user = NexUserFactory()
+    discount = _both_ways(plans)
+    request, _ = discounts.open_request(user, discount)
+    discounts.decide(request.pk, approve=True)
+
+    assert discounts.active_discount(user).via == UserDiscount.Via.REQUEST
+    footer = PriceView(book=discounts.book_for(user)).footer(plans[1])
+    assert footer.endswith("скидки «Скидка ЦУ»</b>") and "промокоду" not in footer
+
+
+def test_code_is_unique_across_kinds(plans):
+    _both_ways(plans)
+    with pytest.raises(ValidationError):
+        Discount(title="т", kind="code", code="cu2026", valid_until=now() + timedelta(days=1)).clean()
+
+
+def test_code_only_discounts_are_seeded_and_hidden_from_menu():
+    user = NexUserFactory()
+    for title, code, badge in [("Скидка 30%", "NEX30X85N8", "30"), ("Скидка 50%", "NEX50B26SW", "50")]:
+        discount = Discount.objects.get(code=code)
+        assert discount.title == title and discount.kind == Discount.Kind.CODE and discount.badge == badge
+        assert not discount.show_in_menu and discount not in discounts.menu_discounts(user)

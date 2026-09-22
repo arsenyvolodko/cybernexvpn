@@ -138,7 +138,7 @@ def expired_plans(options) -> InlineKeyboardMarkup:
     """Тарифы. Нажатие применяет выбор сразу, без экрана подтверждения."""
     items = [
         InlineKeyboardButton(
-            text=f"{option.name} — от {option.min_price_month}₽/мес",
+            text=f"{option.name} — от {option.min_price_month}₽/мес{option.mark}",
             callback_data=ExpiredCallback(step="pick", device_limit=option.device_limit).pack(),
         )
         for option in options
@@ -370,6 +370,7 @@ def _renew_buttons(options) -> list[InlineKeyboardButton]:
         label = f"{option.months} мес. — {option.price}₽"
         if option.months > 1:
             label += f" ({option.price // option.months}₽/мес)"
+        label += option.mark
         items.append(
             InlineKeyboardButton(text=label, callback_data=RenewCallback(months=option.months).pack())
         )
@@ -387,7 +388,7 @@ def plan_list(options) -> InlineKeyboardMarkup:
             continue
         items.append(
             InlineKeyboardButton(
-                text=f"{option.name} — от {option.min_price_month}₽/мес",
+                text=f"{option.name} — от {option.min_price_month}₽/мес{option.mark}",
                 callback_data=PlanCallback(device_limit=option.device_limit, action="open").pack(),
             )
         )
@@ -411,6 +412,7 @@ def _topup_buttons(device_limit: int, options) -> list[InlineKeyboardButton]:
         label = f"{option.months} мес. — {option.price}₽"
         if option.months > 1:
             label += f" ({option.price_month}₽/мес)"
+        label += option.mark
         items.append(
             InlineKeyboardButton(
                 text=label,

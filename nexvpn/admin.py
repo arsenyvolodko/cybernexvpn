@@ -621,10 +621,14 @@ class DiscountAdmin(admin.ModelAdmin):
     inlines = (DiscountPriceInline,)
     readonly_fields = ("link", "active_count", "pending_count", "created_at")
     fieldsets = (
-        (None, {"fields": ("title", "kind", "valid_until", "is_active")}),
+        (None, {"fields": ("title", "kind", "valid_until", "badge", "is_active")}),
         ("Промокод", {
             "fields": ("code", "link"),
-            "description": "Только для вида «Промокод». Ссылка применяет его сама, ещё до подписки на канал.",
+            "description": (
+                "У промокода код обязателен. У скидки с подтверждением — по желанию: с кодом её можно "
+                "получить и сразу кодом (или по ссылке), и заявкой. Ссылка применяет скидку сама, ещё до "
+                "подписки на канал."
+            ),
         }),
         ("Кому доступна", {"fields": ("is_public", "user_ids")}),
         ("Скидка с подтверждением", {"fields": ("show_in_menu", "verification_prompt")}),
@@ -656,8 +660,8 @@ class DiscountAdmin(admin.ModelAdmin):
 class UserDiscountAdmin(admin.ModelAdmin):
     """Кто какую скидку получил. Подтверждать заявки — кнопками в боте."""
 
-    list_display = ("user", "discount", "status", "created_at", "decided_at")
-    list_filter = ("status", "discount")
+    list_display = ("user", "discount", "status", "via", "created_at", "decided_at")
+    list_filter = ("status", "via", "discount")
     search_fields = ("user__username", "user__pk")
     raw_id_fields = ("user",)
     readonly_fields = ("created_at", "decided_at")

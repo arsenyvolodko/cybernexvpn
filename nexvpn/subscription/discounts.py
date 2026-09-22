@@ -24,12 +24,17 @@ class PriceBook:
 
     discount: Discount | None = None
     prices: dict[int, int] = field(default_factory=dict)  # plan_id → ₽ за 30 дней
+    via: str = ""  # как человек получил скидку: code / request
 
     def price_month(self, plan: Plan) -> int:
         return self.prices.get(plan.pk, plan.price_month)
 
     def is_discounted(self, plan: Plan) -> bool:
         return plan.pk in self.prices
+
+    def mark(self, plan: Plan) -> str:
+        """Надпись для кнопки с ценой — только если цена этого тарифа по скидке."""
+        return self.discount.button_mark if self.discount is not None and self.is_discounted(plan) else ""
 
     def visible_plans(self) -> list[Plan]:
         """Тарифы, которые можно выбрать. Со скидкой — только её тарифы."""
@@ -42,12 +47,12 @@ class PriceBook:
         return any(p.pk == plan.pk for p in self.visible_plans())
 
 
-def book_of(discount: Discount | None) -> PriceBook:
+def book_of(discount: Discount | None, via: str = "") -> PriceBook:
     """Книга по конкретной скидке — например, записанной в платёж."""
     if discount is None:
         return PriceBook()
     prices = dict(discount.prices.values_list("plan_id", "price_month"))
-    return PriceBook(discount=discount, prices=prices)
+    return PriceBook(discount=discount, prices=prices, via=via)
 
 
 def active_discount(user: NexUser) -> UserDiscount | None:
@@ -67,7 +72,7 @@ def active_discount(user: NexUser) -> UserDiscount | None:
 
 def book_for(user: NexUser) -> PriceBook:
     held = active_discount(user)
-    return book_of(held.discount if held else None)
+    return book_of(held.discount, held.via) if held else PriceBook()
 
 
 # --- применение ---
@@ -92,7 +97,8 @@ def find_code(user: NexUser, raw: str) -> CodeResult:
     code = normalize_code(raw)
     if not re.match(Discount.CODE_PATTERN, code):
         return CodeResult(None, "not_found")
-    discount = Discount.objects.filter(kind=Discount.Kind.CODE, code__iexact=code).first()
+    # Код бывает и у скидки с подтверждением — тогда код даёт её сразу, без заявки.
+    discount = Discount.objects.filter(code__iexact=code).exclude(code="").first()
     if discount is None:
         return CodeResult(None, "not_found")
     if not discount.is_valid() or not discount.available_to(user.pk):
@@ -101,13 +107,13 @@ def find_code(user: NexUser, raw: str) -> CodeResult:
 
 
 @transaction.atomic
-def activate(user: NexUser, discount: Discount) -> UserDiscount:
+def activate(user: NexUser, discount: Discount, via: str = UserDiscount.Via.CODE) -> UserDiscount:
     """Сделать скидку действующей. Прежняя действующая становится «заменена»."""
     UserDiscount.objects.filter(user=user, status=UserDiscount.Status.ACTIVE).update(
         status=UserDiscount.Status.REPLACED, decided_at=now()
     )
     return UserDiscount.objects.create(
-        user=user, discount=discount, status=UserDiscount.Status.ACTIVE, decided_at=now()
+        user=user, discount=discount, status=UserDiscount.Status.ACTIVE, decided_at=now(), via=via
     )
 
 
@@ -166,7 +172,9 @@ def open_request(user: NexUser, discount: Discount, replace_before=None) -> tupl
     try:
         with transaction.atomic():
             return (
-                UserDiscount.objects.create(user=user, discount=discount, status=UserDiscount.Status.PENDING),
+                UserDiscount.objects.create(
+                    user=user, discount=discount, status=UserDiscount.Status.PENDING, via=UserDiscount.Via.REQUEST
+                ),
                 True,
             )
     except IntegrityError:
