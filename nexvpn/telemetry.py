@@ -32,6 +32,7 @@ from django.utils.timezone import localdate, now
 from nexvpn.enums import PanelSyncStatusEnum
 from nexvpn.models import (
     InboundUsageDay,
+    LinkUsageDay,
     NexUser,
     NodeUsageDay,
     PanelPresence,
@@ -478,3 +479,35 @@ def usage_by_user(days: int = 7, limit: int = 100) -> list[dict]:
             "current_node": presence.node_name if presence else "",
         })
     return rows
+
+
+def record_link_usage(node_name: str, rows: list[dict]) -> IngestResult:
+    """Принять суточный срез по связкам от сборщика на ноде.
+
+    Значения абсолютные (итог за сутки), поэтому идемпотентно: повторная
+    доставка перезапишет строку теми же числами, а пропущенный запуск
+    догонится следующим.
+
+    Списки людей приходят как id панели. Мы их не переводим в свои id и не
+    обогащаем: для этой таблицы важно «сколько разных», а кто именно —
+    вопрос к другим экранам.
+    """
+    stored = 0
+    for row in rows:
+        LinkUsageDay.objects.update_or_create(
+            date=row["date"],
+            exit_node=node_name,
+            entry=row["entry"],
+            protocol=row["protocol"],
+            defaults={
+                "bytes_in": int(row.get("bytes_in") or 0),
+                "bytes_out": int(row.get("bytes_out") or 0),
+                "connections": int(row.get("connections") or 0),
+                "probes": int(row.get("probes") or 0),
+                "users": sorted({str(u) for u in (row.get("users") or [])}),
+                "probing": sorted({str(u) for u in (row.get("probing") or [])}),
+            },
+        )
+        stored += 1
+    logger.info("Связки с %s: записано строк %s", node_name, stored)
+    return IngestResult(stored=stored, unknown_users=0)

@@ -10,5 +10,6 @@ urlpatterns = [
     path("api/tunnels/", views.tunnels),
     path("api/cohorts/", views.cohorts),
     path("api/infra/", views.infrastructure),
+    path("api/links/", views.link_usage),
     path("api/users/<int:user_id>/", views.user_card),
 ]

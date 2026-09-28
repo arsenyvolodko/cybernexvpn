@@ -97,3 +97,38 @@ def ingest_inbound_usage(request: Request) -> Response:
         return Response({"detail": "не разобрал строки"}, status=400)
 
     return Response({"stored": result.stored, "unknown_users": result.unknown_users})
+
+
+@api_view(["POST"])
+def ingest_link_usage(request: Request) -> Response:
+    """Суточный срез по связкам «вход → выход → протокол».
+
+    Тело:
+        {"node": "de2-ghostnet", "rows": [
+            {"date": "2026-09-29", "entry": "atlex", "protocol": "grpc",
+             "bytes_in": 986000, "bytes_out": 46170000,
+             "connections": 619, "probes": 240,
+             "users": ["388", "356"], "probing": ["401"]}
+        ]}
+
+    Байты берутся из счётчиков ядра на ноде, люди — из журнала доступа Xray.
+    Пробы автовыбора отделены: без этого счёт людей завышался на треть.
+    """
+    if not _authorized(request):
+        return Response(status=403)
+
+    payload = request.data if isinstance(request.data, dict) else {}
+    node = payload.get("node")
+    rows = payload.get("rows")
+    if not node or not isinstance(rows, list):
+        return Response({"detail": "нужны node и rows"}, status=400)
+    if len(rows) > MAX_ROWS:
+        return Response({"detail": f"слишком много строк: {len(rows)}"}, status=400)
+
+    try:
+        result = telemetry.record_link_usage(node, rows)
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.warning("Кривой срез связок с %s: %s", node, exc)
+        return Response({"detail": "не разобрал строки"}, status=400)
+
+    return Response({"stored": result.stored})

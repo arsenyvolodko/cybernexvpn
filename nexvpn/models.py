@@ -1360,3 +1360,65 @@ class ServerCost(models.Model):
         if self.kind == self.Kind.YEAR:
             return (self.amount / Decimal("12")).quantize(Decimal("0.01"))
         return Decimal("0")
+
+
+class LinkUsageDay(models.Model):
+    """Сколько прошло через связку «российский вход → зарубежный выход» за сутки.
+
+    Строится не из панели, а из двух источников на самой ноде: счётчики
+    nftables дают байты, журнал доступа Xray — людей. Ключ — тройка
+    «вход, выход, протокол». Именно она, а не название туннеля, отвечает на
+    вопрос «что на самом деле работает»: на одну связку может приходиться
+    несколько туннелей, а «Авто» вообще перебирает их все подряд.
+
+    Пользователи хранятся списком id, а не числом: уникальных за неделю
+    нельзя получить сложением уникальных за каждый день. Список короткий —
+    сотни значений в худшем случае.
+    """
+
+    class Entry(models.TextChoices):
+        ATLEX = "atlex", "Atlex (Россия)"
+        TIMEWEB = "timeweb", "Timeweb (Россия)"
+        EUROBYTE_A = "eurobyte_a", "EuroByte (Россия)"
+        EUROBYTE_B = "eurobyte_b", "EuroByte 2 (Россия)"
+        DIRECT = "direct", "Напрямую, без прослойки"
+
+    date = models.DateField("дата")
+    exit_node = models.CharField("выход", max_length=63, help_text="Имя ноды в панели")
+    entry = models.CharField("вход", max_length=16, choices=Entry.choices)
+    protocol = models.CharField("протокол", max_length=24)
+
+    bytes_in = models.BigIntegerField("принято", default=0)
+    bytes_out = models.BigIntegerField("отдано", default=0)
+    connections = models.PositiveIntegerField("соединений", default=0)
+    # Пробы автовыбора: приложение дёргает generate_204 через КАЖДОЕ плечо
+    # профиля, даже неиспользуемое. Без отделения счёт людей завышался на треть.
+    probes = models.PositiveIntegerField("проб автовыбора", default=0)
+
+    users = models.JSONField("кто качал", default=list, blank=True)
+    probing = models.JSONField("кто только щупал", default=list, blank=True)
+
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "связка за сутки"
+        verbose_name_plural = "Связки: трафик и люди"
+        ordering = ["-date", "exit_node", "entry", "protocol"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["date", "exit_node", "entry", "protocol"],
+                name="unique_link_usage_day",
+            )
+        ]
+        indexes = [models.Index(fields=["-date", "exit_node"])]
+
+    def __str__(self):
+        return f"{self.date} {self.entry} → {self.exit_node} / {self.protocol}"
+
+    @property
+    def bytes_total(self):
+        return self.bytes_in + self.bytes_out
+
+    @property
+    def unique_users(self):
+        return len(self.users or [])

@@ -14,7 +14,7 @@ from functools import wraps
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 
-from . import infra, periods, queries
+from . import infra, links, periods, queries
 
 
 def _staff_page(view):
@@ -173,3 +173,24 @@ def infrastructure(request):
     Период в шапке сюда не относится: это состояние на сейчас, а не за срок.
     """
     return JsonResponse(infra.overview())
+
+
+@_staff_api
+def link_usage(request):
+    """Связки «вход → выход → протокол»: матрица по туннелям и топ каналов.
+
+    Считается по данным с самих нод: байты со счётчиков ядра, люди из журнала
+    доступа. Панель тут ни при чём — она знает трафик на пользователя, но не
+    знает, через какую прослойку он прошёл.
+    """
+    period = periods.parse(request.GET)
+    try:
+        limit = min(100, max(5, int(request.GET.get("limit", 30))))
+    except (TypeError, ValueError):
+        limit = 30
+    return JsonResponse(
+        {
+            "matrix": links.tunnel_matrix(period.date_from, period.date_to),
+            "top": links.top_links(period.date_from, period.date_to, limit),
+        }
+    )

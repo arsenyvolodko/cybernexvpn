@@ -217,7 +217,6 @@
       <div class="tip" id="tip"></div>
     </div>
   </div>
-
   <div class="panel">
     <div class="head">
       <div><h2>Платежи</h2><div class="sub" id="payHint">За выбранный период</div></div>
@@ -229,22 +228,18 @@
     </div>
     <div class="scroll"><table id="payTable"></table></div>
   </div>
-
   <div class="panel">
     <div class="head">
-      <div>
-        <h2>Когорты по неделям регистрации</h2>
-        <div class="sub">Когорта — неделя, в которую человек появился в базе. Деньги и удержание
-          считаются за всю её жизнь, а не за выбранный период: даты в шапке на эту таблицу
-          не влияют. Цвет ячейки — доля относительно лучшей недели в столбце, у заголовков
-          есть подсказки. Строка — клик: откроется список этой когорты.</div>
-      </div>
+      <div><h2>Пользователи</h2><div class="sub" id="userHint">—</div></div>
       <span class="spacer"></span>
-      <select id="cohortWeeks" title="Сколько недель показывать"></select>
+      <select id="discountFilter" title="Фильтр по скидкам и промокодам">
+        <option value="">Скидка: все</option>
+      </select>
+      <input type="search" id="q" placeholder="имя, @username или id">
     </div>
-    <div class="scroll"><table id="cohortTable"></table></div>
+    <div class="chips" id="segments"></div>
+    <div class="scroll"><table id="userTable"></table></div>
   </div>
-
   <div class="panel">
     <div class="head">
       <div>
@@ -259,7 +254,20 @@
       <div class="tip" id="activityTip"></div>
     </div>
   </div>
-
+  <div class="panel">
+    <div class="head">
+      <div>
+        <h2>Когорты по неделям регистрации</h2>
+        <div class="sub">Когорта — неделя, в которую человек появился в базе. Деньги и удержание
+          считаются за всю её жизнь, а не за выбранный период: даты в шапке на эту таблицу
+          не влияют. Цвет ячейки — доля относительно лучшей недели в столбце, у заголовков
+          есть подсказки. Строка — клик: откроется список этой когорты.</div>
+      </div>
+      <span class="spacer"></span>
+      <select id="cohortWeeks" title="Сколько недель показывать"></select>
+    </div>
+    <div class="scroll"><table id="cohortTable"></table></div>
+  </div>
   <div class="panel">
     <div class="head">
       <div>
@@ -274,7 +282,6 @@
     <div class="cards inline" id="infraCards"></div>
     <div class="scroll"><table id="srvTable"></table></div>
   </div>
-
   <div class="panel">
     <div class="head">
       <div>
@@ -290,23 +297,41 @@
     </div>
     <div class="infra-grid" id="tunGrid"><div class="empty">Спрашиваем панель…</div></div>
   </div>
+  <div class="panel">
+    <div class="head">
+      <div>
+        <h2>Туннели × протоколы</h2>
+        <div class="sub">Строка — туннель из подписки, столбец — протокол, которым он работает.
+          <b>«Авто» здесь нет намеренно</b>: у автоподбора нет своего трафика, он раскладывается
+          по тем же плечам, что и ручные туннели, и отдельной строкой мы посчитали бы одни и
+          те же байты дважды.</div>
+      </div>
+      <span class="spacer"></span>
+      <select id="linkMetric">
+        <option value="both">Показывать: трафик и людей</option>
+        <option value="bytes">Показывать: трафик</option>
+        <option value="users">Показывать: людей</option>
+      </select>
+    </div>
+    <div class="scroll"><table id="linkMatrix"></table></div>
+  </div>
 
   <div class="panel">
     <div class="head">
       <div>
-        <h2>Туннели</h2>
-        <div class="sub">Считается по access log нод: соединение попадает сюда, только если оно
-          реально установилось. Пустой туннель — это «не выбрали ИЛИ не работает», по логу не различить.</div>
+        <h2>Каналы подключения</h2>
+        <div class="sub">Связка «российский вход → зарубежный выход → протокол» — то, что
+          работает на самом деле. Байты берутся со счётчиков ядра на нодах, люди — из журнала
+          доступа. <b>Пробы автовыбора отделены</b>: приложение дёргает проверочный адрес через
+          каждое плечо профиля, и без фильтра счёт людей завышался примерно на треть.</div>
       </div>
       <span class="spacer"></span>
-      <select id="tunnelMetric">
-        <option value="people">Показывать: людей</option>
-        <option value="connections">Показывать: соединения</option>
+      <select id="linkSort">
+        <option value="bytes">Сортировать: по трафику</option>
+        <option value="users">Сортировать: по людям</option>
       </select>
     </div>
-    <svg class="chart" id="tunnelChart"></svg>
-    <div class="legend" id="tunnelLegend"></div>
-    <div class="scroll" style="margin-top:14px"><table id="tunnelTable"></table></div>
+    <div class="scroll"><table id="linkTop"></table></div>
   </div>
 
   <div class="panel">
@@ -322,7 +347,6 @@
     </div>
     <div class="scroll"><table class="matrix" id="matrixTable"></table></div>
   </div>
-
   <div class="cols">
     <div class="panel">
       <h2>Как подключаются</h2>
@@ -337,19 +361,6 @@
         бывает несколько человек. Складывать их было бы враньём.</div>
       <div class="scroll"><table id="operatorTable"></table></div>
     </div>
-  </div>
-
-  <div class="panel">
-    <div class="head">
-      <div><h2>Пользователи</h2><div class="sub" id="userHint">—</div></div>
-      <span class="spacer"></span>
-      <select id="discountFilter" title="Фильтр по скидкам и промокодам">
-        <option value="">Скидка: все</option>
-      </select>
-      <input type="search" id="q" placeholder="имя, @username или id">
-    </div>
-    <div class="chips" id="segments"></div>
-    <div class="scroll"><table id="userTable"></table></div>
   </div>
 </div>
 
@@ -569,9 +580,7 @@ function showTip(i, px, py) {
 window.addEventListener("resize", () => {
   if (chartData) drawChart(chartData);
   if (activityData) drawActivityChart(activityData);
-  if (tunnelData) drawMultiChart(tunnelData);
 });
-let tunnelData = null;
 
 // ─── таблицы ───
 // Состояние таблиц живёт снаружи: сортировка и «показать всех» должны
@@ -676,7 +685,7 @@ async function loadPayments() {
     { title: "Мес.", num: true, cell: (r) => r.months },
     { title: "Сумма", num: true, cell: (r) => fmtMoney(r.amount) },
     { title: "Статус", cell: (r) => r.paid ? '<span class="tag ok">оплачен</span>' : '<span class="tag no">не оплачен</span>' },
-  ], data.rows, (row) => row.user_id && openUser(row.user_id));
+  ], data.rows, (row) => row.user_id && openUser(row.user_id), { limit: 10 });
 }
 
 function drawSegments() {
@@ -718,57 +727,15 @@ async function loadUsers() {
     { title: "Скидка", cell: (r) => r.discount ? esc(r.discount.title) : "—",
       sort: (r) => r.discount ? r.discount.title : "" },
     { title: "Пришёл", cell: (r) => fmtDate(r.created_at), sort: (r) => stamp(r.created_at) },
-  ], data.rows, (row) => openUser(row.id), { limit: 20 });
+  ], data.rows, (row) => openUser(row.id), { limit: 10 });
 }
 
 // ─── туннели ───
 const PALETTE = ["#12b886", "#4c6ef5", "#f59f00", "#e64980", "#15aabf",
                 "#7950f2", "#fa5252", "#82c91e", "#fd7e14", "#868e96"];
 
-$("tunnelMetric").onchange = (e) => { state.tunnelMetric = e.target.value; loadTunnels(); };
 state.tunnelMetric = "people";
 
-function drawMultiChart(data) {
-  const svg = $("tunnelChart");
-  const W = svg.clientWidth || 900, H = 300;
-  const padL = 58, padR = 14, padT = 14, padB = 30;
-  const w = W - padL - padR, h = H - padT - padB;
-  const n = data.labels.length;
-  if (!n || !data.series.length) {
-    svg.innerHTML = "";
-    $("tunnelLegend").innerHTML = '<span class="muted">За этот период данных нет</span>';
-    return;
-  }
-  const peak = Math.max(...data.series.flatMap((s) => s.values), 0);
-  const ticks = niceTicks(peak);
-  const maxY = ticks[ticks.length - 1] || 1;
-  const x = (i) => n === 1 ? padL + w / 2 : padL + (w * i) / (n - 1);
-  const y = (v) => padT + h - (h * v) / maxY;
-
-  let out = "";
-  ticks.forEach((t) => {
-    out += '<line class="grid" x1="' + padL + '" y1="' + y(t) + '" x2="' + (W - padR) + '" y2="' + y(t) + '"/>';
-    out += '<text class="axis" x="' + (padL - 8) + '" y="' + (y(t) + 4) + '" text-anchor="end">' + fmtInt(t) + "</text>";
-  });
-  data.series.forEach((line, index) => {
-    const color = PALETTE[index % PALETTE.length];
-    const path = line.values.map((v, i) => (i ? "L" : "M") + x(i) + " " + y(v)).join(" ");
-    out += '<path d="' + path + '" fill="none" stroke="' + color + '" stroke-width="2" stroke-linejoin="round"/>';
-    if (n <= 60) line.values.forEach((v, i) => {
-      out += '<circle cx="' + x(i) + '" cy="' + y(v) + '" r="2.5" fill="#fff" stroke="' + color + '" stroke-width="2"/>';
-    });
-  });
-  const every = Math.max(1, Math.ceil(n / 12));
-  data.labels.forEach((label, i) => {
-    if (i % every === 0 || i === n - 1) {
-      out += '<text class="axis" x="' + x(i) + '" y="' + (H - 8) + '" text-anchor="middle">' + label + "</text>";
-    }
-  });
-  svg.innerHTML = out;
-
-  $("tunnelLegend").innerHTML = data.series.map((line, index) =>
-    '<span><i style="background:' + PALETTE[index % PALETTE.length] + '"></i>' + line.title + "</span>").join("");
-}
 
 function drawMatrix(matrix) {
   const table = $("matrixTable");
@@ -807,11 +774,8 @@ async function loadTunnels() {
   const data = await api("/dash/api/tunnels/", { tunnel_metric: state.tunnelMetric });
   if (!data) return;
 
-  tunnelData = data.series;
-  drawMultiChart(data.series);
-
   const peakPeople = Math.max(...data.tunnels.map((t) => t.people), 1);
-  drawTable($("tunnelTable"), [
+  const unusedTunnelColumns = [
     { title: "Туннель", cell: (r) => r.title + (r.known ? "" :
         ' <span class="tag no">нет в подписке</span>') },
     { title: "Куда", cell: (r) => r.node + (r.via_relay ? " · через релей" : "") },
@@ -825,7 +789,8 @@ async function loadTunnels() {
         if (r.network_in_clients) return value + ' <span class="muted">адр.</span>';
         return '<span class="muted">не видно</span>';
       } },
-  ], data.tunnels);
+  ];
+  void unusedTunnelColumns; void peakPeople;   // блок «Туннели» убран, разметки для него больше нет
 
   drawMatrix(data.matrix);
 
@@ -845,6 +810,61 @@ async function loadTunnels() {
     { title: "Людей, прямые", cell: (r) => r.people ? bar(r.people, peakOperator) : "—" },
     { title: "Адресов, релей", cell: (r) => r.relay_clients ? bar(r.relay_clients, peakRelay) : "—" },
   ], data.operators);
+}
+
+// ─── связки: туннели × протоколы и каналы подключения ───
+// Считается по данным с самих нод, а не из панели: панель знает трафик на
+// человека, но не знает, через какую российскую прослойку он прошёл.
+state.linkMetric = "both";
+state.linkSort = "bytes";
+$("linkMetric").onchange = (e) => { state.linkMetric = e.target.value; drawLinkMatrix(); };
+$("linkSort").onchange = (e) => { state.linkSort = e.target.value; drawLinkTop(); };
+
+let linkData = null;
+
+function linkCell(cell) {
+  if (!cell) return '<span class="muted">—</span>';
+  const bytes = fmtBytes(cell.bytes);
+  const people = fmtInt(cell.users) + " чел.";
+  if (state.linkMetric === "bytes") return bytes;
+  if (state.linkMetric === "users") return people;
+  return bytes + ' <span class="muted">· ' + people + "</span>";
+}
+
+function drawLinkMatrix() {
+  if (!linkData) return;
+  const matrix = linkData.matrix;
+  if (!matrix.columns.length) {
+    $("linkMatrix").innerHTML =
+      '<tbody><tr><td class="empty">Данных ещё нет — ноды начнут присылать после выката</td></tr></tbody>';
+    return;
+  }
+  const columns = [{ title: "Туннель", cell: (r) => esc(r.title) }];
+  matrix.columns.forEach((c) => columns.push({
+    title: c.title, num: true, cell: (r) => linkCell(r.cells[c.key]),
+  }));
+  columns.push({ title: "Всего", num: true, sort: (r) => r.bytes,
+                 cell: (r) => linkCell({ bytes: r.bytes, users: r.users }) });
+  drawTable($("linkMatrix"), columns, matrix.rows);
+}
+
+function drawLinkTop() {
+  if (!linkData) return;
+  const rows = linkData.top.slice();
+  rows.sort((a, b) => state.linkSort === "users" ? b.users - a.users : b.bytes - a.bytes);
+  drawTable($("linkTop"), [
+    { title: "Канал", cell: (r) => esc(r.title) },
+    { title: "Трафик", num: true, sort: (r) => r.bytes, cell: (r) => fmtBytes(r.bytes) },
+    { title: "Людей", num: true, sort: (r) => r.users, cell: (r) => fmtInt(r.users) },
+  ], rows, null, { limit: 10 });
+}
+
+async function loadLinks() {
+  const data = await api("/dash/api/links/", { limit: 30 });
+  if (!data) return;
+  linkData = data;
+  drawLinkMatrix();
+  drawLinkTop();
 }
 
 // ─── когорты ───
@@ -1281,6 +1301,7 @@ async function reload() {
   loadPayments();
   loadCohorts();
   loadTunnels();
+  loadLinks();
   loadUsers();
 }
 $("discountFilter").onchange = (e) => { state.discount = e.target.value; loadUsers(); };
