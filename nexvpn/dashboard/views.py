@@ -14,7 +14,7 @@ from functools import wraps
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 
-from . import periods, queries
+from . import infra, periods, queries
 
 
 def _staff_page(view):
@@ -164,3 +164,12 @@ def user_card(request, user_id: int):
     if card is None:
         return JsonResponse({"error": "Нет такого пользователя"}, status=404)
     return JsonResponse(card)
+
+
+@_staff_api
+def infrastructure(request):
+    """Серверы, деньги и устройство туннелей — одним запросом.
+
+    Период в шапке сюда не относится: это состояние на сейчас, а не за срок.
+    """
+    return JsonResponse(infra.overview())

@@ -129,6 +129,60 @@
   .kv div { background: #f8fafc; border-radius: 9px; padding: 8px 11px; }
   .kv .t { color: var(--muted); font-size: 11.5px; }
   .kv .v { font-weight: 600; margin-top: 2px; }
+
+  /* ── Инфраструктура ──────────────────────────────────────────────
+     Туннель — это не строка таблицы: у него путь из нескольких плеч,
+     свой порядок перебора и свои правила. Карточка вмещает всё сразу,
+     и ничего не надо раскрывать. */
+  .infra-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(410px, 1fr)); gap: 12px; }
+  .tun { border: 1px solid var(--line); border-radius: 12px; padding: 13px 15px 12px; background: var(--card); }
+  .tun.bad { border-color: #f0b6a0; background: #fffaf8; }
+  .tun h3 { margin: 0; font-size: 14.5px; font-weight: 640; display: flex; align-items: center;
+            gap: 7px; flex-wrap: wrap; }
+  .tun .badges { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 7px; }
+  .pill { font-size: 11px; border-radius: 999px; padding: 2px 8px; background: #eef1f6; color: var(--muted);
+          white-space: nowrap; }
+  .pill.auto { background: #e7f0ff; color: #2b5fa8; }
+  .pill.mux { background: var(--accent-soft); color: #0b7a5a; }
+  .pill.tpl { background: #f4eefc; color: #7048a8; }
+  .pill.warn { background: #ffe8dd; color: var(--warn); }
+
+  .path { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+  .leg { display: flex; align-items: center; gap: 6px; font-size: 12.5px; flex-wrap: wrap;
+         padding: 5px 7px; border-radius: 8px; background: #f8fafc; }
+  .leg .tg { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+             color: var(--muted); min-width: 30px; }
+  .leg .node { font-weight: 600; }
+  .leg .arr { color: #b6c0ce; }
+  .leg .tr { color: var(--muted); font-size: 11.5px; margin-left: auto; white-space: nowrap; }
+  .leg.dim { opacity: .55; }
+  .leg .q { color: var(--warn); cursor: help; }
+
+  .order { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12px; }
+  .order .step { border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; background: #fff; }
+  .order .step.fb { border-color: var(--accent); color: #0b7a5a; }
+  .order .to { color: #b6c0ce; }
+
+  .rules { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 8px; }
+  .rules .r { display: flex; gap: 8px; font-size: 12.5px; padding: 2px 0; align-items: baseline; }
+  .rules .r .w { color: var(--ink); }
+  .rules .r .g { color: #b6c0ce; }
+  .rules .r .t { color: var(--muted); }
+  .rules .r.block .t { color: var(--warn); }
+  .rules .r .ex { color: #9aa6b8; font-size: 11.5px; }
+  .tun .why { margin-top: 9px; font-size: 12px; color: var(--warn); display: flex; gap: 6px; }
+  .tun .why.note { color: var(--muted); }
+  .tun .foot { margin-top: 9px; font-size: 11.5px; color: var(--muted); }
+
+  .srv-name { font-weight: 600; }
+  .srv-sub { color: var(--muted); font-size: 11.5px; }
+  .due { border-radius: 6px; padding: 2px 7px; font-variant-numeric: tabular-nums; }
+  .due.soon { background: #fff3cd; color: #8a6100; }
+  .due.now { background: #ffe8dd; color: var(--warn); font-weight: 600; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; }
+  .dot.on { background: var(--accent); }
+  .dot.off { background: #e8590c; }
+  .dot.na { background: #ccd4e0; }
 </style>
 </head>
 <body>
@@ -204,6 +258,37 @@
       <svg class="chart" id="activityChart"></svg>
       <div class="tip" id="activityTip"></div>
     </div>
+  </div>
+
+  <div class="panel">
+    <div class="head">
+      <div>
+        <h2>Серверы и деньги</h2>
+        <div class="sub">Список ведётся в админке — <a href="/admin/nexvpn/server/">Серверы</a>.
+          Цены, лимиты и даты продления оттуда, живость и онлайн — из панели.
+          Прод, панель, релеи и зеркало подписки нодами не являются, поэтому у них прочерк в этих столбцах.</div>
+      </div>
+      <span class="spacer"></span>
+      <select id="srvRole"><option value="">Все роли</option></select>
+    </div>
+    <div class="cards inline" id="infraCards"></div>
+    <div class="scroll"><table id="srvTable"></table></div>
+  </div>
+
+  <div class="panel">
+    <div class="head">
+      <div>
+        <h2>Как устроены туннели</h2>
+        <div class="sub">Каждая карточка — строка, которую человек видит в приложении, и всё,
+          что за ней стоит: через какой сервер заходит, на каком выходит, каким протоколом и по каким
+          правилам делится трафик. Собирается вживую из панели, кэш на пять минут.
+          Выход через российский релей панель прямо не сообщает — он доопределяется по профилю конфига
+          и по названию хоста.</div>
+      </div>
+      <span class="spacer"></span>
+      <div id="infraHealth"><span class="pill">читаем панель…</span></div>
+    </div>
+    <div class="infra-grid" id="tunGrid"><div class="empty">Спрашиваем панель…</div></div>
   </div>
 
   <div class="panel">
@@ -1026,6 +1111,162 @@ async function openUser(id) {
 }
 
 // ─── запуск ───
+
+// ─── инфраструктура ───
+// Состояние на сейчас, а не за период: даты в шапке сюда не относятся,
+// поэтому запрос идёт без них и не перезагружается при смене дат.
+const infraState = { role: "" };
+
+const CURRENCY_SIGN = { RUB: "₽", EUR: "€", USD: "$" };
+
+// Валют может быть несколько, и суммировать их в одну цифру нельзя.
+function moneyByCurrency(totals) {
+  const parts = Object.entries(totals || {});
+  if (!parts.length) return "—";
+  return parts.map(([code, value]) => fmtInt(value) + " " + (CURRENCY_SIGN[code] || code)).join(" + ");
+}
+
+function srvTraffic(row) {
+  if (row.used_bytes === null || row.used_bytes === undefined) return '<span class="muted">—</span>';
+  const used = fmtBytes(row.used_bytes);
+  if (!row.limit_tb) return used + ' <span class="srv-sub">безлимит</span>';
+  const share = Math.min(100, row.used_share || 0);
+  return '<div class="bar-cell"><span>' + used + " из " + row.limit_tb + ' ТБ</span>' +
+         '<span class="track"><span class="fill" style="width:' + share + '%"></span></span></div>';
+}
+
+function srvDue(row) {
+  if (!row.renew_at) return '<span class="muted">—</span>';
+  const d = row.days_left;
+  const cls = d === null ? "" : d < 0 ? " now" : d <= 7 ? " now" : d <= 21 ? " soon" : "";
+  const tail = d === null ? "" : d < 0 ? " · просрочено" : " · " + d + " дн.";
+  return '<span class="due' + cls + '">' + fmtDate(row.renew_at) + tail + "</span>" +
+         (row.auto_renew ? ' <span class="pill">авто</span>' : "");
+}
+
+function srvAlive(row) {
+  if (!row.node) return '<span class="dot na"></span><span class="muted">не нода</span>';
+  if (row.alive === null) return '<span class="dot na"></span><span class="muted">нет в панели</span>';
+  return '<span class="dot ' + (row.alive ? "on" : "off") + '"></span>' +
+         (row.alive ? "на связи" : "не отвечает");
+}
+
+function drawServers(data) {
+  const money = (v, cur) => v ? fmtInt(Math.round(v)) + " " + (cur === "EUR" ? "€" : cur === "USD" ? "$" : "₽") : "—";
+  // Плитки рисует общий `drawCards`: ключи у него title/value/hint, значение —
+  // уже готовая строка, поэтому format не задаём.
+  drawCards($("infraCards"), [
+    { title: "Расход в месяц", value: moneyByCurrency(data.monthly),
+      hint: "По используемым серверам: цена плюс ежемесячные доп. расходы. Разовые не входят. Пустые цены — не проставлены в админке." },
+    { title: "Ближайшее продление", value: data.soonest ? fmtDate(data.soonest.date) : "—",
+      hint: data.soonest ? data.soonest.name + ", через " + data.soonest.days + " дн."
+                         : "Даты продления ещё не проставлены" },
+    { title: "Ноды на связи", value: data.alive + (data.dead ? " из " + (data.alive + data.dead) : ""),
+      hint: data.dead ? data.dead + " не отвечает" : "Все ноды панели отвечают" },
+    { title: "Серверов всего", value: fmtInt(data.rows.length),
+      hint: "Включая те, что нодами не являются: прод, панель, релеи, зеркало подписки." },
+  ], null, null);
+
+  const roles = [...new Set(data.rows.map((r) => r.role).filter(Boolean))];
+  const sel = $("srvRole");
+  if (sel.options.length <= 1) {
+    roles.forEach((r) => sel.add(new Option(r, r)));
+    sel.onchange = (e) => { infraState.role = e.target.value; drawServers(infraState.data); };
+  }
+  const rows = infraState.role ? data.rows.filter((r) => r.role === infraState.role) : data.rows;
+
+  drawTable($("srvTable"), [
+    // Ссылка стоит на названии, а не на всей строке: случайный клик по таблице
+    // не должен уводить со страницы.
+    { title: "Сервер", sort: (r) => r.name, cell: (r) => {
+        const name = r.id ? '<a href="/admin/nexvpn/server/' + r.id + '/change/">' + esc(r.name) + "</a>" : esc(r.name);
+        return '<div class="srv-name">' + name +
+          (r.is_active ? "" : ' <span class="pill warn">не используется</span>') +
+          '</div><div class="srv-sub">' + esc([r.provider, r.address].filter(Boolean).join(" · ")) + "</div>";
+      } },
+    { title: "Роль", sort: (r) => r.role, cell: (r) => esc(r.role) },
+    { title: "Где", sort: (r) => r.country, cell: (r) => esc([r.country, r.city].filter(Boolean).join(", ")) || "—" },
+    { title: "Статус", sort: (r) => (r.alive === null ? null : r.alive ? 1 : 0), cell: srvAlive },
+    { title: "Онлайн", num: true, sort: (r) => r.online, cell: (r) => r.online === null || r.online === undefined ? "—" : fmtInt(r.online) },
+    { title: "Трафик", sort: (r) => r.used_bytes, cell: srvTraffic },
+    { title: "Цена", num: true, sort: (r) => r.price, cell: (r) => money(r.price, r.currency) },
+    { title: "Доп.", num: true, sort: (r) => r.extra, cell: (r) =>
+        r.extra ? '<span title="' + esc(r.costs.map((c) => c.title + ": " + c.amount + " (" + c.kind + ")").join("\n")) +
+                  '">' + money(r.extra, r.currency) + "</span>" : "—" },
+    { title: "Итого", num: true, sort: (r) => r.total, cell: (r) => money(r.total, r.currency) },
+    { title: "Продлить", sort: (r) => (r.renew_at ? Date.parse(r.renew_at) : null), cell: srvDue },
+  ], rows);
+}
+
+function legRow(leg) {
+  const exit = leg.exit.server
+    ? esc(leg.exit.server) + (leg.exit.alive === false ? ' <span class="q" title="нода не на связи">!</span>' : "")
+    : '<span class="q" title="Панель не говорит, куда ведёт этот релей. Допишите в название хоста «→ имя-ноды».">не определено</span>';
+  const same = leg.direct;
+  return '<div class="leg' + (leg.disabled ? " dim" : "") + '">' +
+    '<span class="tg">' + esc(leg.tag) + "</span>" +
+    (same ? "" : '<span class="node">' + esc(leg.entry.server) + '</span><span class="arr">→</span>') +
+    '<span class="node">' + exit + "</span>" +
+    (same ? ' <span class="srv-sub">напрямую</span>' : "") +
+    '<span class="tr">' + esc(leg.transport) + " · " + leg.port +
+    (leg.multiplex ? ' <span class="pill mux">мультиплекс</span>' : "") + "</span></div>";
+}
+
+function tunnelCard(t) {
+  const badges = [];
+  if (t.auto) badges.push('<span class="pill auto">автовыбор</span>');
+  if (t.multiplex) badges.push('<span class="pill mux">весь мультиплекс</span>');
+  if (t.template) badges.push('<span class="pill tpl">' + esc(t.template) + "</span>");
+  if (t.domain_strategy) badges.push('<span class="pill">DNS: ' + esc(t.domain_strategy) + "</span>");
+  if (t.policy && t.policy.buffer) badges.push('<span class="pill">буфер ' + t.policy.buffer + " КБ</span>");
+
+  const order = t.order.length
+    ? '<div class="order"><span class="srv-sub">порядок:</span>' + t.order.map((o, i) =>
+        (i ? '<span class="to">→</span>' : "") + '<span class="step' + (o.fallback ? " fb" : "") + '" title="' +
+        (o.fallback ? "запасной выход" : "вес " + o.weight) + '">' + esc(o.label) + "</span>").join("") + "</div>"
+    : "";
+
+  const rules = t.routing.length
+    ? '<div class="rules">' + t.routing.map((r) =>
+        '<div class="r ' + r.kind + '"><span class="w">' + esc(r.what) + '</span><span class="g">→</span>' +
+        '<span class="t">' + esc(r.where) + "</span>" +
+        (r.samples && r.samples.length ? '<span class="ex">' + esc(r.samples.slice(0, 3).join(", ")) + "</span>" : "") +
+        "</div>").join("") + "</div>"
+    : "";
+
+  const probe = t.probe
+    ? '<div class="foot">Пробы: раз в ' + esc(t.probe.interval) + ", " + t.probe.sampling +
+      " замера, таймаут " + esc(t.probe.timeout) + " · " + esc(t.probe.destination) + "</div>"
+    : "";
+
+  const why = t.problems.map((p) => '<div class="why">⚠ ' + esc(p) + "</div>").join("") +
+              t.notes.map((p) => '<div class="why note">· ' + esc(p) + "</div>").join("");
+
+  return '<div class="tun' + (t.problems.length ? " bad" : "") + '">' +
+    "<h3>" + esc(t.title) + "</h3>" +
+    (badges.length ? '<div class="badges">' + badges.join("") + "</div>" : "") +
+    '<div class="path">' + t.legs.map(legRow).join("") + "</div>" +
+    order + rules + probe + why + "</div>";
+}
+
+async function loadInfra() {
+  const res = await fetch("/dash/api/infra/", { credentials: "same-origin" });
+  if (res.status === 403) { location.href = "/admin/login/?next=/dash/"; return; }
+  const data = await res.json();
+  infraState.data = data.servers;
+  drawServers(data.servers);
+  const bp = data.blueprint;
+  $("infraHealth").innerHTML = !data.panel_ok
+    ? '<span class="pill warn">панель недоступна</span>'
+    : bp.problems
+      ? '<span class="pill warn">' + bp.problems + " проблем" + (bp.notes ? " · " + bp.notes + " замечаний" : "") + "</span>"
+      : '<span class="pill mux">всё сходится' + (bp.notes ? " · " + bp.notes + " замечаний" : "") + "</span>";
+  // Сломанные — наверх: из-за них у людей прямо сейчас что-то не работает.
+  const tunnels = bp.tunnels.slice().sort((a, b) => (b.problems.length > 0) - (a.problems.length > 0));
+  $("tunGrid").innerHTML = tunnels.length ? tunnels.map(tunnelCard).join("")
+    : '<div class="empty">Панель ничего не отдала</div>';
+}
+
 async function reload() {
   const data = await api("/dash/api/overview/", { metric: state.metric });
   if (!data) return;
@@ -1046,6 +1287,7 @@ $("discountFilter").onchange = (e) => { state.discount = e.target.value; loadUse
 drawSegments();
 drawActivityChips();
 reload();
+loadInfra();
 </script>
 </body>
 </html>

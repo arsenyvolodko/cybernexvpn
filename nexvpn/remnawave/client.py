@@ -16,6 +16,7 @@
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 
@@ -190,6 +191,59 @@ class RemnawaveClient:
         """Инбаунды всех конфиг-профилей: нужны, чтобы развернуть uuid в тег."""
         response = self._request("GET", "/api/config-profiles/inbounds") or {}
         return response.get("inbounds", [])
+
+    def list_config_profiles(self) -> list[dict[str, Any]]:
+        """Конфиг-профили с их нодами: по ним видно, где живёт каждый инбаунд.
+
+        Один профиль крутится сразу на нескольких нодах (Default-Profile — на
+        пяти), поэтому инбаунд сам по себе не говорит, куда ведёт туннель:
+        нужна ещё пара «адрес хоста ↔ адрес ноды».
+        """
+        response = self._request("GET", "/api/config-profiles")
+        if isinstance(response, list):
+            return response
+        return (response or {}).get("configProfiles", [])
+
+    def list_subscription_templates(
+        self, with_json: bool = False, only_uuids: set[str] | None = None
+    ) -> list[dict[str, Any]]:
+        """Шаблоны подписки. Профиль с несколькими выходами описан только здесь.
+
+        Список отдаёт `templateJson` не для всех шаблонов; с `with_json=True`
+        недостающие дочитываются по одному — по запросу на шаблон. Их больше
+        десятка, и читать все ради двух нужных значит ждать почти десять
+        секунд, поэтому есть `only_uuids`: дочитывать только те, на которые
+        реально кто-то ссылается.
+        """
+        response = self._request("GET", "/api/subscription-templates")
+        items = response if isinstance(response, list) else (response or {}).get("templates") or []
+        if not with_json:
+            return items
+        need = [
+            item for item in items
+            if item.get("templateJson") is None and item.get("uuid")
+            and (only_uuids is None or item["uuid"] in only_uuids)
+        ]
+        if not need:
+            return items
+
+        def fetch(uuid: str):
+            try:
+                return uuid, (self._request("GET", f"/api/subscription-templates/{uuid}") or {}).get("templateJson")
+            except RemnawaveError as exc:
+                logger.warning("Не дочитался шаблон %s: %s", uuid, exc)
+                return uuid, None
+
+        # Запросы независимы, а панель отвечает почти полсекунды каждому:
+        # последовательно восемь штук — это восемь секунд ожидания страницы.
+        with ThreadPoolExecutor(max_workers=min(8, len(need))) as pool:
+            fetched = dict(pool.map(fetch, [item["uuid"] for item in need]))
+
+        return [
+            dict(item, templateJson=fetched[item["uuid"]])
+            if item.get("uuid") in fetched and fetched[item["uuid"]] is not None else item
+            for item in items
+        ]
 
     # --- squad'ы -------------------------------------------------------
 

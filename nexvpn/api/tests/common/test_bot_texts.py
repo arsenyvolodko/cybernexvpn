@@ -87,3 +87,14 @@ def test_text_is_valid_telegram_html(name):
 )
 def test_broken_markup_is_caught(broken):
     assert problems_in(broken)
+
+
+def test_we_never_tell_people_to_pick_a_tunnel_by_ping():
+    """Пинг меряет отклик, а блокировки душат трафик уже после установки
+    соединения: туннель с лучшим пингом сплошь и рядом не работает. Совет
+    «выбирай с наименьшим пингом» стоял в боте и ломал людям выбор."""
+    from bot import faq_topics, texts
+
+    everything = texts.CONNECT_SUCCESS + " " + " ".join(t.body + " " + t.button for t in faq_topics.TOPICS)
+    for phrase in ("наименьш", "лучший туннель", "пропускай"):
+        assert phrase not in everything.lower(), f"вернулся совет по выбору туннеля: {phrase}"

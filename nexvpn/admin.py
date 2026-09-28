@@ -24,6 +24,8 @@ from nexvpn.models import (
     Payment,
     Plan,
     PromoCode,
+    Server,
+    ServerCost,
     Subscription,
     SubscriptionEvent,
     Transaction,
@@ -790,3 +792,57 @@ class UserDiscountAdmin(admin.ModelAdmin):
     search_fields = ("user__username", "user__pk")
     raw_id_fields = ("user",)
     readonly_fields = ("created_at", "decided_at")
+
+
+class ServerCostInline(admin.TabularInline):
+    model = ServerCost
+    extra = 0
+    verbose_name = "расход"
+    verbose_name_plural = "Дополнительные расходы (помимо основной цены)"
+    fields = ("title", "amount", "currency", "kind", "happened_on", "note")
+
+
+@admin.register(Server)
+class ServerAdmin(admin.ModelAdmin):
+    list_display = (
+        "name", "provider", "role", "country", "panel_node_name",
+        "price_display", "extra_display", "total_display", "renew_at", "is_active",
+    )
+    list_filter = ("role", "provider", "is_active", "auto_renew")
+    search_fields = ("name", "provider", "address", "note")
+    ordering = ("role", "name")
+    inlines = (ServerCostInline,)
+    fieldsets = (
+        (None, {"fields": ("name", "provider", "role", "is_active", "note")}),
+        ("Где стоит", {"fields": ("address", "country", "city")}),
+        ("Деньги и сроки", {"fields": ("price_month", "currency", "renew_at", "auto_renew", "traffic_limit_tb")}),
+        ("Связь с панелью", {
+            "fields": ("panel_node_name",),
+            "description": "Имя ноды в Remnawave. Пусто — сервер работает, но нодой не является: "
+                           "прод, панель, релей, зеркало подписки.",
+        }),
+    )
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).prefetch_related("costs")
+
+    @admin.display(description="цена/мес")
+    def price_display(self, obj):
+        return f"{obj.price_month:.0f} {obj.get_currency_display()}" if obj.price_month else "—"
+
+    @admin.display(description="доп.")
+    def extra_display(self, obj):
+        extra = obj.monthly_extra
+        return f"{extra:.0f}" if extra else "—"
+
+    @admin.display(description="итого/мес")
+    def total_display(self, obj):
+        total = obj.monthly_total
+        return f"{total:.0f} {obj.get_currency_display()}" if total else "—"
+
+
+@admin.register(ServerCost)
+class ServerCostAdmin(admin.ModelAdmin):
+    list_display = ("title", "server", "amount", "currency", "kind", "happened_on")
+    list_filter = ("kind", "currency", "server")
+    search_fields = ("title", "note")

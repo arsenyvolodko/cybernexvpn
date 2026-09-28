@@ -1237,3 +1237,126 @@ class BroadcastPollVote(models.Model):
 
     def __str__(self):
         return f"{self.user_id}: {self.option_ids}"
+
+
+class Server(models.Model):
+    """Железка, за которую мы платим. Учёт денег и сроков, а не конфигов.
+
+    Панель знает про ноды: живы ли, сколько на них людей, сколько прокачали.
+    Но она ничего не знает про то, сколько сервер стоит, когда продлевать и
+    какой у него лимит трафика по тарифу хостера — а половина инфраструктуры
+    (прод, панель, релеи, зеркало подписки) вообще не ноды и в панели
+    отсутствует. Поэтому список серверов ведётся здесь, а с панелью
+    связывается по `panel_node_name`, когда связь есть.
+    """
+
+    class Role(models.TextChoices):
+        EXIT_ABROAD = "exit_abroad", "Выход за рубеж"
+        RELAY_RU = "relay_ru", "Российский вход-релей"
+        EXIT_RU = "exit_ru", "Российский выход"
+        PANEL = "panel", "Панель"
+        APP = "app", "Прод (бот и сайт)"
+        SUB_MIRROR = "sub_mirror", "Зеркало подписки"
+        OTHER = "other", "Прочее"
+
+    class Currency(models.TextChoices):
+        RUB = "RUB", "₽"
+        EUR = "EUR", "€"
+        USD = "USD", "$"
+
+    name = models.CharField("название", max_length=63, unique=True)
+    provider = models.CharField("хостер", max_length=63, blank=True, default="")
+    address = models.CharField("адрес или домен", max_length=127, blank=True, default="")
+    country = models.CharField("страна", max_length=63, blank=True, default="")
+    city = models.CharField("город", max_length=63, blank=True, default="")
+    role = models.CharField("роль", max_length=16, choices=Role.choices, default=Role.EXIT_ABROAD)
+
+    # Лимит по тарифу хостера. Пусто — безлимит: так у большинства наших,
+    # и заводить отдельный флаг «безлимит» значило бы держать два поля,
+    # которые рано или поздно разойдутся.
+    traffic_limit_tb = models.DecimalField(
+        "лимит трафика, ТБ", max_digits=7, decimal_places=2, null=True, blank=True,
+        help_text="Пусто — безлимит",
+    )
+    price_month = models.DecimalField(
+        "цена в месяц", max_digits=10, decimal_places=2, null=True, blank=True,
+    )
+    currency = models.CharField("валюта", max_length=3, choices=Currency.choices, default=Currency.RUB)
+    renew_at = models.DateField("продлить до", null=True, blank=True)
+    auto_renew = models.BooleanField("автопродление", default=False)
+    is_active = models.BooleanField("используется", default=True)
+
+    # Имя ноды в панели Remnawave. Пусто — сервер в панели не заведён
+    # (прод, панель, релеи, зеркало): они работают, но нодами не являются.
+    panel_node_name = models.CharField(
+        "нода в панели", max_length=63, blank=True, default="",
+        help_text="Как нода называется в Remnawave, например de1-ovh. Пусто — сервер не нода.",
+    )
+    note = models.TextField("заметка", blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "сервер"
+        verbose_name_plural = "Серверы"
+        ordering = ["role", "name"]
+
+    def __str__(self):
+        return f"{self.name} ({self.provider})" if self.provider else self.name
+
+    @property
+    def monthly_extra(self):
+        """Доп. расходы, приведённые к месяцу. Разовые сюда не входят."""
+        from decimal import Decimal
+
+        total = Decimal("0")
+        for cost in self.costs.all():
+            total += cost.per_month
+        return total
+
+    @property
+    def monthly_total(self):
+        from decimal import Decimal
+
+        return (self.price_month or Decimal("0")) + self.monthly_extra
+
+
+class ServerCost(models.Model):
+    """Расход на конкретный сервер помимо основного тарифа.
+
+    Дополнительный IP, бэкапы, защита от DDoS, разовая установка. Хранится
+    отдельной строкой, а не приплюсовывается к цене, чтобы в дашборде было
+    видно, из чего сложилась сумма.
+    """
+
+    class Kind(models.TextChoices):
+        ONCE = "once", "Разовый"
+        MONTH = "month", "Ежемесячный"
+        YEAR = "year", "Ежегодный"
+
+    server = models.ForeignKey(Server, on_delete=models.CASCADE, related_name="costs")
+    title = models.CharField("за что", max_length=127)
+    amount = models.DecimalField("сумма", max_digits=10, decimal_places=2)
+    currency = models.CharField("валюта", max_length=3, choices=Server.Currency.choices, default=Server.Currency.RUB)
+    kind = models.CharField("периодичность", max_length=8, choices=Kind.choices, default=Kind.MONTH)
+    happened_on = models.DateField("дата", null=True, blank=True)
+    note = models.TextField("заметка", blank=True, default="")
+
+    class Meta:
+        verbose_name = "расход по серверу"
+        verbose_name_plural = "Расходы по серверам"
+        ordering = ["server", "title"]
+
+    def __str__(self):
+        return f"{self.title}: {self.amount} {self.currency}"
+
+    @property
+    def per_month(self):
+        """Сколько это стоит в пересчёте на месяц. Разовый — ноль."""
+        from decimal import Decimal
+
+        if self.kind == self.Kind.MONTH:
+            return self.amount
+        if self.kind == self.Kind.YEAR:
+            return (self.amount / Decimal("12")).quantize(Decimal("0.01"))
+        return Decimal("0")
