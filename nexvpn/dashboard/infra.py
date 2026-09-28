@@ -555,7 +555,8 @@ def servers(snapshot: dict, rows: list[dict]) -> dict:
         "monthly_rub": _to_rub(monthly),
         "alive": alive,
         "dead": dead,
-        "soonest": {"name": soonest["name"], "date": soonest["date"].isoformat(), "days": soonest["days"]}
+        "soonest": {"name": soonest["name"], "date": soonest["date"].isoformat(),
+                    "day": soonest["day"], "days": soonest["days"]}
         if soonest else None,
     }
 

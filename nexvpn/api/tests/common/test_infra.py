@@ -481,3 +481,18 @@ def test_total_is_none_when_rate_unknown(monkeypatch):
 
     assert infra._to_rub({"RUB": 100.0, "EUR": 5.0}) is None
     assert infra._to_rub({}) == 0.0
+
+
+@pytest.mark.django_db
+def test_soonest_keeps_day_of_month(monkeypatch):
+    """Карточка «ближайшее продление» показывает число — оно не должно теряться."""
+    from nexvpn.dashboard import infra
+    from nexvpn.models import Server
+
+    Server.objects.create(name="srv", renew_at=dt.date(2026, 1, 17), price_month=100)
+    monkeypatch.setattr(infra, "fx_rates", lambda: {"RUB": 1.0})
+
+    data = infra.servers({"nodes": []}, infra.server_rows())
+
+    assert data["soonest"]["day"] == 17
+    assert data["soonest"]["days"] is not None
