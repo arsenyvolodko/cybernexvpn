@@ -1156,11 +1156,14 @@ function srvTraffic(row) {
 }
 
 function srvDue(row) {
-  if (!row.renew_at) return '<span class="muted">—</span>';
+  // Показываем число месяца, а не дату: хостинг продлевается каждый месяц
+  // одного и того же числа, и полная дата через месяц стала бы «просрочено».
+  if (!row.renew_day) return '<span class="muted">—</span>';
   const d = row.days_left;
-  const cls = d === null ? "" : d < 0 ? " now" : d <= 7 ? " now" : d <= 21 ? " soon" : "";
-  const tail = d === null ? "" : d < 0 ? " · просрочено" : " · " + d + " дн.";
-  return '<span class="due' + cls + '">' + fmtDate(row.renew_at) + tail + "</span>" +
+  const cls = d === null ? "" : d <= 7 ? " now" : d <= 21 ? " soon" : "";
+  const tail = d === null ? "" : " · через " + d + " дн.";
+  return '<span class="due' + cls + '" title="' + (row.renew_at || "") + '">' +
+         row.renew_day + "-го" + tail + "</span>" +
          (row.auto_renew ? ' <span class="pill">авто</span>' : "");
 }
 
@@ -1172,15 +1175,29 @@ function srvAlive(row) {
 }
 
 function drawServers(data) {
-  const money = (v, cur) => v ? fmtInt(Math.round(v)) + " " + (cur === "EUR" ? "€" : cur === "USD" ? "$" : "₽") : "—";
+  // Без округления: 12,50 € и 430 ₽ — это разные суммы, и подменять их
+  // на «13» и «430» в таблице, по которой сверяют счета, нельзя.
+  const money = (v, cur) => v
+    ? v.toLocaleString("ru-RU", { minimumFractionDigits: 0, maximumFractionDigits: 2 }) +
+      " " + (CURRENCY_SIGN[cur] || "₽")
+    : "—";
   // Плитки рисует общий `drawCards`: ключи у него title/value/hint, значение —
   // уже готовая строка, поэтому format не задаём.
   drawCards($("infraCards"), [
-    { title: "Расход в месяц", value: moneyByCurrency(data.monthly),
-      hint: "По используемым серверам: цена плюс ежемесячные доп. расходы. Разовые не входят. Пустые цены — не проставлены в админке." },
-    { title: "Ближайшее продление", value: data.soonest ? fmtDate(data.soonest.date) : "—",
-      hint: data.soonest ? data.soonest.name + ", через " + data.soonest.days + " дн."
-                         : "Даты продления ещё не проставлены" },
+    { title: "Расход в месяц",
+      value: data.monthly_rub === null || data.monthly_rub === undefined
+        ? moneyByCurrency(data.monthly)
+        : data.monthly_rub.toLocaleString("ru-RU", { maximumFractionDigits: 0 }) + " ₽",
+      hint: (data.monthly_rub === null
+              ? "Курс ЦБ сейчас недоступен, поэтому суммы показаны по валютам. "
+              : "Всё сведено в рубли по курсу ЦБ. ") +
+            "В валютах: " + moneyByCurrency(data.monthly) +
+            ". По используемым серверам: цена плюс ежемесячные доп. расходы, разовые не входят. " +
+            "Пустые цены — не проставлены в админке." },
+    { title: "Ближайшее продление", value: data.soonest ? data.soonest.day + "-го" : "—",
+      hint: data.soonest
+        ? data.soonest.name + ", через " + data.soonest.days + " дн. (" + fmtDate(data.soonest.date) + ")"
+        : "Даты продления ещё не проставлены" },
     { title: "Ноды на связи", value: data.alive + (data.dead ? " из " + (data.alive + data.dead) : ""),
       hint: data.dead ? data.dead + " не отвечает" : "Все ноды панели отвечают" },
     { title: "Серверов всего", value: fmtInt(data.rows.length),

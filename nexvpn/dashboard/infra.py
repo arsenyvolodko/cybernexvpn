@@ -19,11 +19,22 @@
 
 from __future__ import annotations
 
+import calendar
 import datetime as dt
+import json
 import logging
 import re
+import urllib.request
+from xml.etree import ElementTree
 
+from django.core.cache import cache
 from django.utils import timezone
+
+# Официальный ЦБ в XML — он доступен оттуда, где зеркало cbr-xml-daily уже нет.
+CBR_URL = "https://www.cbr.ru/scripts/XML_daily.asp"
+# Запасной на случай, если ЦБ не ответит: отдаёт курсы ОТ рубля, поэтому 1/курс.
+FX_FALLBACK_URL = "https://open.er-api.com/v6/latest/RUB"
+FX_CACHE_KEY = "nex:fx-rates"
 
 logger = logging.getLogger(__name__)
 
@@ -383,6 +394,94 @@ def blueprint(snapshot: dict, servers: list[dict] | None = None) -> dict:
 # ─────────────────────────── серверы и деньги ───────────────────────────
 
 
+def fx_rates():
+    """Курсы к рублю с сайта ЦБ. Возвращает None, если узнать не удалось.
+
+    Выдумывать запасной курс нельзя: цифра «расход в месяц» выглядит точной,
+    и подставить в неё прошлогодний курс хуже, чем честно сказать «не знаю».
+    """
+    cached = cache.get(FX_CACHE_KEY)
+    if cached is not None:
+        return cached or None
+    rates = _rates_from_cbr() or _rates_from_fallback()
+    # Неудачу тоже кэшируем, но ненадолго: иначе будем долбить ЦБ на каждый показ.
+    cache.set(FX_CACHE_KEY, rates or {}, 6 * 3600 if rates else 600)
+    return rates
+
+
+def _rates_from_cbr():
+    try:
+        with urllib.request.urlopen(CBR_URL, timeout=8) as response:
+            tree = ElementTree.fromstring(response.read())
+        rates = {"RUB": 1.0}
+        for item in tree.findall("Valute"):
+            code = (item.findtext("CharCode") or "").upper()
+            if code not in ("EUR", "USD"):
+                continue
+            # ЦБ отдаёт запятую как разделитель дробной части.
+            value = float((item.findtext("Value") or "0").replace(",", "."))
+            nominal = float(item.findtext("Nominal") or 1)
+            rates[code] = value / nominal
+        return rates if len(rates) == 3 else None
+    except Exception as exc:                      # noqa: BLE001 — курс не критичен
+        logger.warning("Курс ЦБ не получен: %s", exc)
+        return None
+
+
+def _rates_from_fallback():
+    """Запасной источник отдаёт курсы ОТ рубля, поэтому берём обратные."""
+    try:
+        with urllib.request.urlopen(FX_FALLBACK_URL, timeout=8) as response:
+            data = json.load(response)
+        rub_rates = data.get("rates") or {}
+        rates = {"RUB": 1.0}
+        for code in ("EUR", "USD"):
+            per_rub = float(rub_rates[code])
+            rates[code] = 1 / per_rub
+        return rates
+    except Exception as exc:                      # noqa: BLE001
+        logger.warning("Запасной курс не получен: %s", exc)
+        return None
+
+
+def next_renewal(renew_at, today):
+    """Следующее продление по числу месяца.
+
+    Хостинг продлевается каждый месяц одного и того же числа, поэтому хранить
+    и показывать полную дату бессмысленно: через месяц она превратится в
+    «просрочено». Берём из даты только число и ищем ближайшее его наступление.
+    """
+    if not renew_at:
+        return None, None
+    day = renew_at.day
+    year, month = today.year, today.month
+    for _ in range(2):
+        last = calendar.monthrange(year, month)[1]
+        candidate = dt.date(year, month, min(day, last))
+        if candidate >= today:
+            return candidate, (candidate - today).days
+        month += 1
+        if month > 12:
+            month, year = 1, year + 1
+    return None, None
+
+
+def _to_rub(monthly: dict[str, float]):
+    """Свести расход к одной цифре в рублях. None, если курс неизвестен."""
+    if not monthly:
+        return 0.0
+    rates = fx_rates()
+    if rates is None:
+        return None
+    total = 0.0
+    for code, value in monthly.items():
+        rate = rates.get(code)
+        if rate is None:
+            return None
+        total += value * rate
+    return round(total, 2)
+
+
 def servers(snapshot: dict, rows: list[dict]) -> dict:
     """Наши серверы с прикрученной к ним живой статистикой панели."""
     nodes = {n.get("name"): n for n in snapshot.get("nodes", [])}
@@ -404,9 +503,9 @@ def servers(snapshot: dict, rows: list[dict]) -> dict:
             limit_tb = round(node_limit / TB, 2)
 
         renew = row.get("renew_at")
-        days_left = (renew - today).days if renew else None
-        if renew and (soonest is None or renew < soonest["date"]):
-            soonest = {"date": renew, "name": row["name"], "days": days_left}
+        next_due, days_left = next_renewal(renew, today)
+        if next_due and (soonest is None or next_due < soonest["date"]):
+            soonest = {"date": next_due, "day": renew.day, "name": row["name"], "days": days_left}
 
         if row.get("panel_node_name"):
             if node is None:
@@ -440,7 +539,8 @@ def servers(snapshot: dict, rows: list[dict]) -> dict:
             "extra": float(row.get("monthly_extra") or 0) or None,
             "total": total or None,
             "currency": row.get("currency") or "RUB",
-            "renew_at": renew.isoformat() if renew else None,
+            "renew_at": next_due.isoformat() if next_due else None,
+            "renew_day": renew.day if renew else None,
             "days_left": days_left,
             "auto_renew": bool(row.get("auto_renew")),
             "is_active": bool(row.get("is_active")),
@@ -451,7 +551,8 @@ def servers(snapshot: dict, rows: list[dict]) -> dict:
     out.sort(key=lambda s: (not s["is_active"], s["role_key"], s["name"]))
     return {
         "rows": out,
-        "monthly": {code: round(value) for code, value in sorted(monthly.items())},
+        "monthly": {code: value for code, value in sorted(monthly.items())},
+        "monthly_rub": _to_rub(monthly),
         "alive": alive,
         "dead": dead,
         "soonest": {"name": soonest["name"], "date": soonest["date"].isoformat(), "days": soonest["days"]}

@@ -432,3 +432,52 @@ def test_currencies_are_not_summed_together(snapshot):
     ]
 
     assert infra.servers(snapshot, rows)["monthly"] == {"EUR": 20, "RUB": 1000}
+
+
+# ─── деньги и продление ───
+
+def test_renewal_repeats_every_month_and_never_looks_overdue():
+    """Число месяца повторяется: 5-го при сегодняшнем 20-м — это следующий месяц."""
+    from nexvpn.dashboard import infra
+
+    today = dt.date(2026, 9, 20)
+    due, days = infra.next_renewal(dt.date(2026, 1, 5), today)
+
+    assert due == dt.date(2026, 10, 5)
+    assert days == 15
+
+
+def test_renewal_today_is_today_not_next_month():
+    from nexvpn.dashboard import infra
+
+    due, days = infra.next_renewal(dt.date(2025, 3, 28), dt.date(2026, 9, 28))
+
+    assert due == dt.date(2026, 9, 28)
+    assert days == 0
+
+
+def test_renewal_clamps_to_short_month():
+    """31-е в феврале — это последний день февраля, а не ошибка."""
+    from nexvpn.dashboard import infra
+
+    due, _ = infra.next_renewal(dt.date(2026, 1, 31), dt.date(2026, 2, 10))
+
+    assert due == dt.date(2026, 2, 28)
+
+
+def test_total_in_rubles_uses_rate(monkeypatch):
+    from nexvpn.dashboard import infra
+
+    monkeypatch.setattr(infra, "fx_rates", lambda: {"RUB": 1.0, "EUR": 100.0, "USD": 90.0})
+
+    assert infra._to_rub({"RUB": 1280.0, "EUR": 12.0, "USD": 27.0}) == 4910.0
+
+
+def test_total_is_none_when_rate_unknown(monkeypatch):
+    """Без курса лучше честно ничего не показать, чем выдумать цифру."""
+    from nexvpn.dashboard import infra
+
+    monkeypatch.setattr(infra, "fx_rates", lambda: None)
+
+    assert infra._to_rub({"RUB": 100.0, "EUR": 5.0}) is None
+    assert infra._to_rub({}) == 0.0
