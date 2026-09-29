@@ -33,22 +33,32 @@ DEBUG = env.bool("DEBUG", default=True)
 
 BASE_URL = env.str("BASE_URL", default="http://localhost:8000")
 
+# Основной домен. Менять здесь, а не по всему файлу: имя переезжало уже
+# дважды, и каждый раз находился забытый список, куда его не вписали.
+DOMAIN_NAME = env.str("DOMAIN_NAME", default="cybernexapp.com")
+
 ALLOWED_HOSTS = env.list(
     "ALLOWED_HOSTS",
     default=[
-        "www.cybernexvpn.ru",
-        "cybernexvpn.ru",
+        DOMAIN_NAME,
+        f"www.{DOMAIN_NAME}",
         "localhost",
         "127.0.0.1",
         "127.0.0.1:8000",
-        # IP серверов, на которых крутился проект.
-        "77.238.236.90",
-        "176.124.203.129",
-        "176.124.203.129:8000",
     ],
 )
 
-CSRF_TRUSTED_ORIGINS = [BASE_URL, "https://www.cybernexvpn.ru", "https://cybernexvpn.ru"]
+# Добавляем домен к тому, что пришло из окружения: в ALLOWED_HOSTS его могли
+# и не перечислить, а без него Django отбивает собственную админку.
+for _host in (DOMAIN_NAME, f"www.{DOMAIN_NAME}"):
+    if _host and _host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(_host)
+
+CSRF_TRUSTED_ORIGINS = [
+    BASE_URL,
+    f"https://{DOMAIN_NAME}",
+    f"https://www.{DOMAIN_NAME}",
+]
 
 APPEND_SLASH = False
 
@@ -285,6 +295,17 @@ ADMIN_API_KEY = env.str("ADMIN_API_KEY")
 
 TG_BOT_URL = env.str("TG_BOT_URL")
 TG_BOT_TOKEN = env.str("TG_BOT_TOKEN", "")
+
+# Вебхук бота. Пусто — работаем опросом, как раньше: так проще и не требует
+# ни белого адреса, ни валидного сертификата. Заполнено — Телеграм сам стучится
+# к нам, задержка меньше и нет постоянных исходящих запросов.
+# Адрес указывается целиком, вместе со схемой: https://cybernexapp.com/tg/<путь>/
+TG_WEBHOOK_URL = env.str("TG_WEBHOOK_URL", "")
+# Секрет уходит в заголовке X-Telegram-Bot-Api-Secret-Token и проверяется на
+# каждом запросе: адрес вебхука рано или поздно попадёт в логи, а секрет нет.
+TG_WEBHOOK_SECRET = env.str("TG_WEBHOOK_SECRET", "")
+TG_WEBHOOK_HOST = env.str("TG_WEBHOOK_HOST", "0.0.0.0")
+TG_WEBHOOK_PORT = env.int("TG_WEBHOOK_PORT", 8081)
 # Через env.int нельзя: пустое значение в .env (а в шаблоне оно пустое)
 # роняет каст, и Django не стартует вовсе.
 TG_ADMIN_USER_ID = int(env.str("TG_ADMIN_USER_ID", "") or 0)
