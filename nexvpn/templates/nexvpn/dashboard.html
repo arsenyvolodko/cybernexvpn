@@ -347,6 +347,20 @@
     </div>
     <div class="scroll"><table class="matrix" id="matrixTable"></table></div>
   </div>
+  <div class="panel">
+    <div class="head">
+      <div>
+        <h2>Выдача ссылки</h2>
+        <div class="sub">Замеры делает страница-мостик <b>в сети самого человека</b> — со своих
+          серверов это мерить бесполезно, они в дата-центрах, где не душат. Проверочный кусок
+          размером с конфиг: блокировка чаще душит канал, чем рвёт соединение, и короткий запрос
+          проходит там, где конфиг уже не доезжает. «Удалось» — это и быстрые, и медленные:
+          ссылка доехала.</div>
+      </div>
+    </div>
+    <div class="scroll"><table id="probeHosts"></table></div>
+    <div class="sub" id="probeSplit" style="margin-top:12px"></div>
+  </div>
   <div class="cols">
     <div class="panel">
       <h2>Как подключаются</h2>
@@ -867,6 +881,51 @@ async function loadLinks() {
   drawLinkTop();
 }
 
+function drawSubProbes(data) {
+  drawTable($("probeHosts"), [
+    { title: "Адрес выдачи", cell: (r) => esc(r.title) },
+    { title: "Удалось", num: true, sort: (r) => r.share_ok,
+      cell: (r) => r.share_ok === null ? "—" : r.share_ok + " %" },
+    { title: "Быстро", num: true, sort: (r) => r.ok, cell: (r) => fmtInt(r.ok) },
+    { title: "Медленно", num: true, sort: (r) => r.slow, cell: (r) => fmtInt(r.slow) },
+    { title: "Не ответил", num: true, sort: (r) => r.failed, cell: (r) => fmtInt(r.failed) },
+    { title: "Медиана", num: true, sort: (r) => r.median_ms,
+      cell: (r) => r.median_ms === null ? "—" : fmtInt(r.median_ms) + " мс" },
+    { title: "Людей", num: true, sort: (r) => r.users, cell: (r) => fmtInt(r.users) },
+  ], data.hosts);
+
+  // Расхождение — единственное число, которое решает, нужен ли выбор домена.
+  // Общая доля отказов его не заменяет: если оба адреса отказывают у одних и
+  // тех же людей, выбирать не из чего.
+  const box = $("probeSplit"), sp = data.split;
+  if (!data.probes) {
+    box.innerHTML = "Замеров пока нет — они приходят со страницы-мостика, когда люди подключаются.";
+    return;
+  }
+  if (!sp.checked) {
+    box.innerHTML = "Замеров " + fmtInt(data.probes) +
+      ", но ни у кого ещё не проверены оба адреса — расхождение считать не на чем.";
+    return;
+  }
+  let out = "Проверены оба адреса у <b>" + fmtInt(sp.checked) + "</b> чел.: " +
+    "оба работают — " + fmtInt(sp.both_ok) + ", " +
+    "работает только один — <b>" + fmtInt(sp.only_one) + "</b>, " +
+    "не работает ни один — " + fmtInt(sp.none) + ".";
+  if (sp.only_by_host.length) {
+    out += " Выручал: " + sp.only_by_host
+      .map((h) => esc(h.host) + " у " + fmtInt(h.users) + " чел.").join(", ") + ".";
+  }
+  out += sp.only_one
+    ? " <b>Расхождения есть</b> — выбор адреса под человека имеет смысл."
+    : " Расхождений нет: всем подходит любой адрес, выбирать незачем.";
+  box.innerHTML = out;
+}
+
+async function loadSubProbes() {
+  const data = await api("/dash/api/sub-probes/");
+  if (data) drawSubProbes(data);
+}
+
 // ─── когорты ───
 // Заголовок с подсказкой: у плиток она есть, а в таблице когорт колонок много
 // и половина из них требует объяснения не меньше, чем плитки.
@@ -1319,6 +1378,7 @@ async function reload() {
   loadCohorts();
   loadTunnels();
   loadLinks();
+  loadSubProbes();
   loadUsers();
 }
 $("discountFilter").onchange = (e) => { state.discount = e.target.value; loadUsers(); };

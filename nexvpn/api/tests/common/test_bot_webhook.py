@@ -9,11 +9,11 @@ from bot.main import webhook_path
 @pytest.mark.parametrize(
     "url,expected",
     [
-        ("https://cybernexvpn.ru/tg/abc123/", "/tg/abc123/"),
-        ("https://cybernexvpn.ru/tg/abc123", "/tg/abc123/"),
+        ("https://cybernexapp.com/tg/abc123/", "/tg/abc123/"),
+        ("https://cybernexapp.com/tg/abc123", "/tg/abc123/"),
         ("http://example.com/hook", "/hook/"),
-        ("https://cybernexvpn.ru", "/"),
-        ("https://cybernexvpn.ru/", "/"),
+        ("https://cybernexapp.com", "/"),
+        ("https://cybernexapp.com/", "/"),
     ],
 )
 def test_path_is_normalised(url, expected):
@@ -29,7 +29,7 @@ def test_without_url_we_stay_on_polling():
     assert not settings.TG_WEBHOOK_URL
 
 
-@override_settings(TG_WEBHOOK_URL="https://cybernexvpn.ru/tg/x/")
+@override_settings(TG_WEBHOOK_URL="https://cybernexapp.com/tg/x/")
 def test_with_url_webhook_mode_is_chosen():
     from django.conf import settings
 

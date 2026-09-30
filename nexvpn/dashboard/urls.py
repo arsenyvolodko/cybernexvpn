@@ -11,5 +11,6 @@ urlpatterns = [
     path("api/cohorts/", views.cohorts),
     path("api/infra/", views.infrastructure),
     path("api/links/", views.link_usage),
+    path("api/sub-probes/", views.sub_probes),
     path("api/users/<int:user_id>/", views.user_card),
 ]

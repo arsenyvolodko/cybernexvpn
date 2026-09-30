@@ -407,8 +407,25 @@ def test_known_servers_are_seeded_by_migration():
     """Список не должен начинаться с пустой страницы."""
     names = set(Server.objects.values_list("name", flat=True))
 
-    assert {"de1-ovh", "ru1-timeweb", "relay-iot", "nex-prod", "nex-vds"} <= names
+    assert {"de1-ovh", "ru1-timeweb", "relay-iot", "nex-prod-ovh", "nex-vds"} <= names
     assert Server.objects.get(name="eu2-alexhost").is_active is False
+
+
+def test_old_and_new_prod_are_separate_records():
+    """Переезд прода не должен переписать адрес поверх старой записи.
+
+    К записи про Aeza привязана история расходов. Поменяй ей адрес — и деньги за
+    сентябрь окажутся записаны на машину, которая тогда ещё не работала.
+    Поэтому старая запись остаётся со своими расходами и уходит из используемых.
+    """
+    old = Server.objects.get(name="nex-prod-aeza (выведен)")
+    new = Server.objects.get(name="nex-prod-ovh")
+
+    assert old.is_active is False
+    assert "176.124" in old.address
+    assert new.is_active is True
+    assert new.address == "57.131.195.67"
+    assert not Server.objects.filter(name="nex-prod").exists()
 
 
 def test_dashboard_page_carries_the_infra_screen(admin_client):

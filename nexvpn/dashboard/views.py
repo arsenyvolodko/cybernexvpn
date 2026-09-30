@@ -14,7 +14,7 @@ from functools import wraps
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 
-from . import infra, links, periods, queries
+from . import infra, links, periods, probes, queries
 
 
 def _staff_page(view):
@@ -173,6 +173,18 @@ def infrastructure(request):
     Период в шапке сюда не относится: это состояние на сейчас, а не за срок.
     """
     return JsonResponse(infra.overview())
+
+
+@_staff_api
+def sub_probes(request):
+    """Выдача ссылки подписки: что показали замеры с устройств людей.
+
+    Отвечает на один вопрос — стоит ли выдавать разным людям разные адреса.
+    Доля отказов сама по себе этого не решает: если оба адреса отказывают у
+    одних и тех же людей, выбирать не из чего.
+    """
+    period = periods.parse(request.GET)
+    return JsonResponse(probes.host_health(period.date_from, period.date_to))
 
 
 @_staff_api
