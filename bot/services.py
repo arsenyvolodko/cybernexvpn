@@ -176,7 +176,7 @@ def get_subscription_view(user: NexUser) -> SubscriptionView:
         subscription=subscription,
         devices_used=devices_used,
         device_limit=subscription.device_limit,
-        web_url=subscription.subscription_url,
+        web_url=subscription.public_subscription_url,
     )
 
 

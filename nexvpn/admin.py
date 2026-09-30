@@ -185,7 +185,8 @@ class SubscriptionInline(admin.StackedInline):
     max_num = 1
     extra = 0
     fields = ("plan", "next_plan", "expires_at", "auto_renew_agreed", "panel_status",
-              "panel_user_id", "subscription_url", "panel_synced_at", "panel_error")
+              "panel_user_id", "subscription_url", "sub_host_override",
+              "panel_synced_at", "panel_error")
     readonly_fields = ("panel_status", "panel_user_id", "subscription_url",
                        "panel_synced_at", "panel_error")
 

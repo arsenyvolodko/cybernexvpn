@@ -146,10 +146,35 @@ class Subscription(models.Model):
     panel_user_id = models.PositiveIntegerField(null=True, blank=True, default=None)
     panel_short_uuid = models.CharField(max_length=63, null=True, blank=True, default=None)
     subscription_url = models.URLField(max_length=255, null=True, blank=True, default=None)
+    # Выдавать ссылку на другом хосте, чем прописан в панели.
+    # Нужно, чтобы пробовать запасные домены на живых людях: адрес выдачи
+    # блокируют по имени, и заранее знать, какое имя переживёт, нельзя.
+    # Синхронизация с панелью это поле не трогает — она переписывает только
+    # `subscription_url`, поэтому ручная настройка не слетает.
+    sub_host_override = models.CharField(
+        "выдавать на хосте", max_length=127, blank=True, default="",
+        help_text="Например sub.cybernexapp.com. Пусто — как в панели.",
+    )
     panel_status = models.CharField(
         max_length=31, choices=PanelSyncStatusEnum.choices, default=PanelSyncStatusEnum.NEVER_SYNCED,
     )
     panel_synced_at = models.DateTimeField(null=True, blank=True, default=None)
+
+    @property
+    def public_subscription_url(self):
+        """Ссылка, которую показываем человеку.
+
+        Отличается от `subscription_url` только хостом и только если он задан
+        вручную. Путь берём из панельного адреса как есть: короткий
+        идентификатор один и тот же на любом зеркале, их и различает только имя.
+        """
+        url = self.subscription_url or ""
+        host = (self.sub_host_override or "").strip()
+        if not url or not host:
+            return url
+        scheme, _, rest = url.partition("://")
+        _, _, path = rest.partition("/")
+        return f"{scheme}://{host}/{path}" if path else f"{scheme}://{host}"
     panel_error = models.TextField(blank=True, default="")
 
     # Задел под автоплатёж YooKassa: пока не используется.
