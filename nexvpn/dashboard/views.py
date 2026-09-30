@@ -8,11 +8,13 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 from functools import wraps
 
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 
 from . import infra, links, periods, probes, queries
 
@@ -196,13 +198,33 @@ def link_usage(request):
     знает, через какую прослойку он прошёл.
     """
     period = periods.parse(request.GET)
+    since, until = period.date_from, period.date_to
+    # Свой период, независимый от шапки. Сбор связок моложе остальных данных, и
+    # смотреть его тем же месяцем, что платежи, бессмысленно: видно три дня из
+    # тридцати, а среднее делится на всё подряд.
+    try:
+        days = int(request.GET.get("days") or 0)
+    except (TypeError, ValueError):
+        days = 0
+    if days:
+        until = timezone.localdate()
+        since = until - dt.timedelta(days=min(365, max(1, days)) - 1)
+
     try:
         limit = min(100, max(5, int(request.GET.get("limit", 30))))
     except (TypeError, ValueError):
         limit = 30
+
+    matrix = links.tunnel_matrix(since, until)
     return JsonResponse(
         {
-            "matrix": links.tunnel_matrix(period.date_from, period.date_to),
-            "top": links.top_links(period.date_from, period.date_to, limit),
+            "matrix": matrix,
+            "top": links.top_links(since, until, limit),
+            "period": {
+                "from": since.isoformat(),
+                "to": until.isoformat(),
+                # Сколько суток реально наблюдали: на это число и делим среднее.
+                "observed_days": matrix.get("observed_days", 0),
+            },
         }
     )

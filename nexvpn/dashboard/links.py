@@ -13,6 +13,8 @@
 from collections import defaultdict
 
 from nexvpn.dashboard import infra
+from django.utils import timezone
+
 from nexvpn.models import LinkUsageDay
 
 # Адрес плеча в подписке -> вход, под которым он считается на выходной ноде.
@@ -55,6 +57,36 @@ def _rows(since, until):
     return LinkUsageDay.objects.filter(date__gte=since, date__lte=until)
 
 
+def observed_days(since, until) -> float:
+    """Сколько суток внутри периода мы действительно наблюдали.
+
+    Делить на длину периода нельзя. Сбор связок начался 28.09.2026, и до этой
+    даты у нас не «ноль трафика», а «неизвестно»: поделив месячный итог на
+    тридцать, мы показали бы среднее втрое ниже правды. Поэтому знаменатель —
+    сутки, за которые есть хоть какие-то данные.
+
+    Сегодняшний день считаем долей прошедшего времени. Целой единицей он
+    занижал бы среднее тем сильнее, чем раньше смотришь: в полдень — вдвое.
+    """
+    days = set(_rows(since, until).values_list("date", flat=True))
+    if not days:
+        return 0.0
+    today = timezone.localdate()
+    whole = len(days - {today})
+    if today not in days:
+        return float(whole)
+    now = timezone.localtime()
+    part = (now.hour * 3600 + now.minute * 60 + now.second) / 86400
+    # В первые минуты суток доля почти ноль — не делим на неё, иначе среднее
+    # улетает в бесконечность. Минимум — час.
+    return whole + max(part, 1 / 24)
+
+
+def _per_day(total_bytes: int, days: float):
+    """Среднесуточный трафик. None, когда наблюдений нет вовсе."""
+    return round(total_bytes / days) if days else None
+
+
 def totals(since, until):
     """Свод по связкам за период: байты складываем, людей объединяем.
 
@@ -77,7 +109,8 @@ def totals(since, until):
 
 
 def top_links(since, until, limit=30):
-    """Топ связок: комбинация, трафик, уникальные люди."""
+    """Топ связок: комбинация, трафик, уникальные люди, среднее за сутки."""
+    days = observed_days(since, until)
     out = []
     for cell in totals(since, until).values():
         out.append({
@@ -90,6 +123,7 @@ def top_links(since, until, limit=30):
                 PROTO_TITLE.get(cell["protocol"], cell["protocol"]),
             ),
             "bytes": cell["bytes"],
+            "per_day": _per_day(cell["bytes"], days),
             "users": len(cell["users"]),
             "probing": len(cell["probing"] - cell["users"]),
             "connections": cell["connections"],
@@ -108,6 +142,7 @@ def tunnel_matrix(since, until, snapshot=None):
     snapshot = snapshot if snapshot is not None else infra.snapshot()
     blueprint = infra.blueprint(snapshot)
     acc = totals(since, until)
+    days = observed_days(since, until)
 
     protocols, rows = set(), []
     for tunnel in blueprint.get("tunnels", []):
@@ -134,6 +169,7 @@ def tunnel_matrix(since, until, snapshot=None):
             "position": tunnel.get("position"),
             "cells": {p: {"bytes": c["bytes"], "users": len(c["users"])} for p, c in cells.items()},
             "bytes": total_bytes,
+            "per_day": _per_day(total_bytes, days),
             "users": len(users),
         })
     rows.sort(key=lambda r: -r["bytes"])
@@ -141,4 +177,5 @@ def tunnel_matrix(since, until, snapshot=None):
     return {
         "columns": [{"key": p, "title": PROTO_TITLE.get(p, p)} for p in columns],
         "rows": rows,
+        "observed_days": round(days, 2),
     }

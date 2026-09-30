@@ -307,6 +307,13 @@
           те же байты дважды.</div>
       </div>
       <span class="spacer"></span>
+      <select id="linkDays">
+        <option value="">Период: как в шапке</option>
+        <option value="1">Период: сутки</option>
+        <option value="7">Период: 7 дней</option>
+        <option value="14">Период: 14 дней</option>
+        <option value="30">Период: 30 дней</option>
+      </select>
       <select id="linkMetric">
         <option value="both">Показывать: трафик и людей</option>
         <option value="bytes">Показывать: трафик</option>
@@ -314,6 +321,7 @@
       </select>
     </div>
     <div class="scroll"><table id="linkMatrix"></table></div>
+    <div class="sub" id="linkPeriodHint" style="margin-top:10px"></div>
   </div>
 
   <div class="panel">
@@ -326,6 +334,13 @@
           каждое плечо профиля, и без фильтра счёт людей завышался примерно на треть.</div>
       </div>
       <span class="spacer"></span>
+      <select id="linkDays2">
+        <option value="">Период: как в шапке</option>
+        <option value="1">Период: сутки</option>
+        <option value="7">Период: 7 дней</option>
+        <option value="14">Период: 14 дней</option>
+        <option value="30">Период: 30 дней</option>
+      </select>
       <select id="linkSort">
         <option value="bytes">Сортировать: по трафику</option>
         <option value="users">Сортировать: по людям</option>
@@ -831,8 +846,19 @@ async function loadTunnels() {
 // человека, но не знает, через какую российскую прослойку он прошёл.
 state.linkMetric = "both";
 state.linkSort = "bytes";
+state.linkDays = "";
 $("linkMetric").onchange = (e) => { state.linkMetric = e.target.value; drawLinkMatrix(); };
 $("linkSort").onchange = (e) => { state.linkSort = e.target.value; drawLinkTop(); };
+// Оба переключателя периода кормят один и тот же запрос, поэтому держим их в
+// одном значении: иначе две таблицы на одной странице показывали бы разное,
+// хотя приходят из одного ответа.
+["linkDays", "linkDays2"].forEach((id) => {
+  $(id).onchange = (e) => {
+    state.linkDays = e.target.value;
+    ["linkDays", "linkDays2"].forEach((other) => { $(other).value = state.linkDays; });
+    loadLinks();
+  };
+});
 
 let linkData = null;
 
@@ -859,6 +885,8 @@ function drawLinkMatrix() {
   }));
   columns.push({ title: "Всего", num: true, sort: (r) => r.bytes,
                  cell: (r) => linkCell({ bytes: r.bytes, users: r.users }) });
+  columns.push({ title: "В среднем", num: true, sort: (r) => r.per_day || 0,
+                 cell: (r) => fmtRate(r.per_day) });
   drawTable($("linkMatrix"), columns, matrix.rows);
 }
 
@@ -869,16 +897,36 @@ function drawLinkTop() {
   drawTable($("linkTop"), [
     { title: "Канал", cell: (r) => esc(r.title) },
     { title: "Трафик", num: true, sort: (r) => r.bytes, cell: (r) => fmtBytes(r.bytes) },
+    { title: "В среднем", num: true, sort: (r) => r.per_day || 0, cell: (r) => fmtRate(r.per_day) },
     { title: "Людей", num: true, sort: (r) => r.users, cell: (r) => fmtInt(r.users) },
   ], rows, null, { limit: 10 });
 }
 
+// «Сколько набегает за сутки и за неделю» — из среднесуточного. Неделя это
+// просто семь суток: считать её отдельно нельзя, на периоде короче недели
+// пришлось бы либо врать, либо прятать столбец.
+function fmtRate(perDay) {
+  if (!perDay) return '<span class="muted">—</span>';
+  return fmtBytes(perDay) + "/сут" +
+    ' <span class="muted">· ' + fmtBytes(perDay * 7) + "/нед</span>";
+}
+
 async function loadLinks() {
-  const data = await api("/dash/api/links/", { limit: 30 });
+  const data = await api("/dash/api/links/", { limit: 30, days: state.linkDays });
   if (!data) return;
   linkData = data;
   drawLinkMatrix();
   drawLinkTop();
+  const p = data.period || {};
+  const box = $("linkPeriodHint");
+  if (!p.observed_days) {
+    box.innerHTML = "За этот период данных нет.";
+  } else {
+    box.innerHTML = "Среднее считается за <b>" + String(p.observed_days).replace(".", ",") +
+      "</b> сут., по которым есть данные внутри " + esc(p.from) + " — " + esc(p.to) +
+      ". Дни до запуска сбора в знаменатель не идут: там не ноль трафика, а неизвестно. " +
+      "Сегодняшний день считается долей прошедшего времени.";
+  }
 }
 
 function drawSubProbes(data) {

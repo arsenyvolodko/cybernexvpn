@@ -109,3 +109,81 @@ def test_dashboard_page_has_new_blocks_and_no_old_one(admin_client):
     assert page.index("<h2>Платежи</h2>") < page.index("<h2>Пользователи</h2>")
     assert page.index("<h2>Пользователи</h2>") < page.index("Активность по дням")
     assert page.index("Активность по дням") < page.index("Когорты по неделям регистрации")
+
+
+# --- среднее за период и свой период у блока ---
+
+
+@pytest.mark.django_db
+def test_average_divides_by_days_with_data_not_by_period_length():
+    """Сбор связок моложе остальных данных, и это главная ловушка среднего.
+
+    До запуска сбора у нас не «ноль трафика», а «неизвестно». Поделив месячный
+    итог на тридцать, мы показали бы среднее втрое ниже правды — и решения по
+    трафику принимались бы по заниженной цифре.
+    """
+    make(YESTERDAY, "atlex", "de2-ghostnet", "grpc", bytes_out=300)
+    make(TODAY, "atlex", "de2-ghostnet", "grpc", bytes_out=100)
+    month_ago = TODAY - dt.timedelta(days=29)
+
+    assert links.observed_days(month_ago, TODAY) == 2
+    row = links.top_links(month_ago, TODAY)[0]
+    # 400 байт за двое наблюдаемых суток, а не за тридцать календарных.
+    assert row["per_day"] == 200
+
+
+@pytest.mark.django_db
+def test_today_counts_as_a_fraction_of_a_day():
+    """Целыми сутками сегодняшний день занижал бы среднее: в полдень — вдвое."""
+    from django.utils import timezone
+
+    today = timezone.localdate()
+    make(today, "atlex", "de2-ghostnet", "grpc", bytes_out=100)
+
+    days = links.observed_days(today, today)
+
+    assert 0 < days < 1
+
+
+@pytest.mark.django_db
+def test_average_is_empty_when_there_are_no_observations():
+    assert links.observed_days(YESTERDAY, TODAY) == 0
+    assert links.top_links(YESTERDAY, TODAY) == []
+
+
+@pytest.mark.django_db
+def test_block_period_is_independent_of_the_header(admin_client):
+    """У блока свой период: смотреть связки тем же месяцем, что платежи, незачем."""
+    from django.utils import timezone
+
+    today = timezone.localdate()
+    long_ago = today - dt.timedelta(days=20)
+    make(long_ago, "atlex", "de2-ghostnet", "grpc", bytes_out=999)
+    make(today, "atlex", "de2-ghostnet", "grpc", bytes_out=100)
+
+    week = admin_client.get("/dash/api/links/", {"days": 7}).json()
+    month = admin_client.get("/dash/api/links/", {"days": 30}).json()
+
+    assert week["top"][0]["bytes"] == 100, "за неделю старая строка попадать не должна"
+    assert month["top"][0]["bytes"] == 1099
+    assert week["period"]["to"] == today.isoformat()
+    assert week["period"]["from"] == (today - dt.timedelta(days=6)).isoformat()
+
+
+@pytest.mark.django_db
+def test_matrix_carries_the_observed_days(admin_client):
+    make(TODAY, "atlex", "de2-ghostnet", "grpc", bytes_out=100)
+
+    body = admin_client.get("/dash/api/links/").json()
+
+    assert "observed_days" in body["matrix"]
+    assert body["period"]["observed_days"] == body["matrix"]["observed_days"]
+
+
+@pytest.mark.django_db
+def test_dashboard_page_carries_the_period_picker(admin_client):
+    html = admin_client.get("/dash/").content.decode()
+
+    assert 'id="linkDays"' in html and 'id="linkDays2"' in html
+    assert "В среднем" in html
+    assert "fmtRate" in html
