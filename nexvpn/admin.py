@@ -26,6 +26,7 @@ from nexvpn.models import (
     PromoCode,
     Server,
     ServerCost,
+    SubHostProbe,
     Subscription,
     SubscriptionEvent,
     Transaction,
@@ -576,6 +577,28 @@ class InboundUsageDayAdmin(admin.ModelAdmin):
     list_display = ("date", "inbound_tag", "node_name", "via_relay", "user", "connections", "last_seen")
     list_filter = ("inbound_tag", "node_name", "via_relay", "date")
     search_fields = ("user__username", "user__pk")
+
+
+@admin.register(SubHostProbe)
+class SubHostProbeAdmin(admin.ModelAdmin):
+    """Пробы адресов выдачи, сделанные на устройствах людей.
+
+    Смотреть тут стоит не отдельные строки, а перевес: если один адрес
+    стабильно отвечает, а второй у тех же людей нет — значит пора выдавать
+    ссылки на первом. Пока страница-мостик только записывает и ничего не
+    выбирает: сперва набираем неделю наблюдений.
+    """
+
+    list_display = ("created_at", "host", "outcome", "ms", "platform", "user")
+    list_filter = ("host", "outcome", "platform")
+    search_fields = ("short_uuid", "user__username", "user__pk")
+    date_hierarchy = "created_at"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Broadcast)

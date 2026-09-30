@@ -1447,3 +1447,43 @@ class LinkUsageDay(models.Model):
     @property
     def unique_users(self):
         return len(self.users or [])
+
+
+class SubHostProbe(models.Model):
+    """Проверка адреса выдачи подписки, выполненная на устройстве человека.
+
+    Мы можем мерить доступность только со своих серверов, а блокируют у всех
+    по-разному: у одного режет оператор, у другого домашний вайфай пропускает.
+    Единственный честный источник — код, отработавший в сети самого человека.
+    Такую пробу делает страница-мостик при подключении и присылает сюда.
+
+    `ms` — время, за которое скачался проверочный кусок сравнимого с конфигом
+    размера. Мерить факт ответа бесполезно: блокировка чаще душит, а не рвёт,
+    и короткий запрос проходит там, где настоящий конфиг застревает.
+    """
+
+    class Outcome(models.TextChoices):
+        OK = "ok", "Ответил"
+        SLOW = "slow", "Ответил, но медленно"
+        FAILED = "failed", "Не ответил"
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    host = models.CharField("адрес выдачи", max_length=127)
+    outcome = models.CharField("исход", max_length=8, choices=Outcome.choices)
+    ms = models.PositiveIntegerField("миллисекунд", default=0)
+    # Кто пробовал. Может быть пусто: страницу открывают и по прямой ссылке,
+    # а терять такие пробы из-за этого не хочется.
+    user = models.ForeignKey(
+        NexUser, on_delete=models.SET_NULL, null=True, blank=True, related_name="sub_probes",
+    )
+    short_uuid = models.CharField(max_length=63, blank=True, default="")
+    platform = models.CharField(max_length=31, blank=True, default="")
+
+    class Meta:
+        verbose_name = "проба адреса подписки"
+        verbose_name_plural = "Пробы адресов подписки"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["-created_at", "host"])]
+
+    def __str__(self):
+        return f"{self.host}: {self.get_outcome_display()} за {self.ms} мс"

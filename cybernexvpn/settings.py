@@ -320,6 +320,11 @@ TG_CHANNEL_URL = env.str("TG_CHANNEL_URL", "https://t.me/cybernexvpn")
 # Пусто — ведём на штатную страницу подписки Remnawave.
 CONNECT_BRIDGE_URL = env.str("CONNECT_BRIDGE_URL", "")
 
+# Адреса выдачи подписки, между которыми выбирает страница-мостик. Список
+# закрытый: пробы приходят из браузера человека, и принимать оттуда
+# произвольные имена значит позволить засорить себе же статистику.
+SUB_PROBE_HOSTS = env.list("SUB_PROBE_HOSTS", default=["sub-nex.com", "sub.cybernexapp.com"])
+
 # Remnawave
 PANEL_API_URL = env.str("PANEL_API_URL", "https://panel.pineferry.com")
 PANEL_API_TOKEN = env.str("PANEL_API_TOKEN", "")
