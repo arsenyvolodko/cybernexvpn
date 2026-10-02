@@ -330,14 +330,25 @@ def test_costs_are_brought_to_one_month():
     assert server.monthly_total == Decimal("1200.00")
 
 
-def test_servers_block_sums_only_active_and_finds_nearest_renewal(snapshot):
-    today = dt.date(2026, 9, 28)
+def test_servers_block_sums_only_active_and_finds_nearest_renewal(snapshot, monkeypatch):
+    """Часы прибиты намеренно.
+
+    Дата продления повторяется по числу месяца, а не раз и навсегда, поэтому
+    «кто ближе» зависит от сегодняшнего числа. Этот тест задавал свою дату,
+    а код брал реальную — и 1 октября порядок перевернулся: сервер с 28-м
+    числом стал ближе, чем с 1-м. Падал не код, а смесь двух календарей.
+    """
+    today = dt.date(2026, 9, 15)
+    monkeypatch.setattr(infra.timezone, "localdate", lambda: today)
+    # Числа задаём явно, а не смещением от «сегодня»: важен день месяца, и при
+    # смещении легко случайно попасть в сегодняшнее число — тогда срок станет
+    # «сегодня, 0 дней», и тест будет проверять не то, что написано в названии.
     rows = [
         {"name": "de1-ovh", "panel_node_name": "de1-ovh", "price_month": Decimal("1000"),
-         "monthly_total": Decimal("1000"), "is_active": True, "renew_at": today + dt.timedelta(days=30),
+         "monthly_total": Decimal("1000"), "is_active": True, "renew_at": dt.date(2026, 9, 28),
          "role": "exit_abroad", "role_display": "Выход за рубеж", "currency": "RUB"},
         {"name": "cs1-cherry", "panel_node_name": "cs1-cherry", "price_month": Decimal("500"),
-         "monthly_total": Decimal("500"), "is_active": True, "renew_at": today + dt.timedelta(days=3),
+         "monthly_total": Decimal("500"), "is_active": True, "renew_at": dt.date(2026, 9, 20),
          "role": "exit_abroad", "role_display": "Выход за рубеж", "currency": "RUB"},
         {"name": "старый", "panel_node_name": "", "price_month": Decimal("9000"),
          "monthly_total": Decimal("9000"), "is_active": False,
@@ -347,6 +358,7 @@ def test_servers_block_sums_only_active_and_finds_nearest_renewal(snapshot):
 
     assert block["monthly"] == {"RUB": 1500}  # выключенный сервер в расход не идёт
     assert block["soonest"]["name"] == "cs1-cherry"
+    assert block["soonest"]["days"] == 5   # 20-е число, сегодня 15-е
     assert block["alive"] == 1 and block["dead"] == 1  # cs1 в фикстуре не на связи
 
 
@@ -513,3 +525,51 @@ def test_soonest_keeps_day_of_month(monkeypatch):
 
     assert data["soonest"]["day"] == 17
     assert data["soonest"]["days"] is not None
+
+
+# --- выход релея через технического двойника ---
+
+
+def test_relay_exit_is_taken_from_the_hidden_twin(snapshot, servers_rows):
+    """Семь «Обходов глушилок» показывали нули при живом трафике.
+
+    Их инбаунд живёт на нескольких нодах, поэтому по профилю выход не
+    определить. Пометку «→ нода» в видимое название дописать нельзя — его
+    читают люди. Но у каждого такого туннеля есть скрытый технический двойник
+    на том же адресе и порте, и он подписан. Берём выход у него.
+    """
+    snapshot["hosts"] = [
+        host("visible", "🇪🇺 Обход глушилок 12 | Моб. интернет", "185.0.0.1", 2443, INB_REALITY),
+        host("twin", "🔒 relay-ru → de1 REALITY :443", "185.0.0.1", 2443, INB_REALITY,
+             isHidden=True),
+    ]
+
+    leg = only(infra.blueprint(snapshot, servers_rows), "🇪🇺 Обход глушилок 12 | Моб. интернет")["legs"][0]
+
+    assert leg["exit"]["node"] == "de1-ovh"
+    assert leg["entry"]["server"] == "relay-ru"
+
+
+def test_own_arrow_wins_over_the_twin(snapshot, servers_rows):
+    """Своя пометка точнее: двойник — это догадка по адресу и порту."""
+    snapshot["hosts"] = [
+        host("visible", "релей → pl1 REALITY", "185.0.0.1", 2443, INB_REALITY),
+        host("twin", "🔒 relay-ru → de1 REALITY", "185.0.0.1", 2443, INB_REALITY, isHidden=True),
+    ]
+
+    leg = only(infra.blueprint(snapshot, servers_rows), "релей → pl1 REALITY")["legs"][0]
+
+    assert leg["exit"]["node"] == "pl1-ovh"
+
+
+def test_twin_on_another_port_is_not_used(snapshot, servers_rows):
+    """Порт релея и есть указание, куда он ведёт: чужой порт — чужой выход."""
+    snapshot["hosts"] = [
+        host("visible", "🇪🇺 Обход глушилок 12 | Моб. интернет", "185.0.0.1", 2443, INB_REALITY),
+        host("twin", "🔒 relay-ru → de1 REALITY", "185.0.0.1", 3443, INB_REALITY, isHidden=True),
+    ]
+
+    tunnel = only(infra.blueprint(snapshot, servers_rows), "🇪🇺 Обход глушилок 12 | Моб. интернет")
+
+    assert tunnel["legs"][0]["exit"]["node"] == ""
+    assert any("не понять, на какой сервер ведёт релей" in n for n in tunnel["notes"])

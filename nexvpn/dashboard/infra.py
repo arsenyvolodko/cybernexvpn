@@ -30,6 +30,8 @@ from xml.etree import ElementTree
 from django.core.cache import cache
 from django.utils import timezone
 
+from . import certs
+
 # Официальный ЦБ в XML — он доступен оттуда, где зеркало cbr-xml-daily уже нет.
 CBR_URL = "https://www.cbr.ru/scripts/XML_daily.asp"
 # Запасной на случай, если ЦБ не ответит: отдаёт курсы ОТ рубля, поэтому 1/курс.
@@ -141,6 +143,11 @@ def _index(snapshot: dict) -> dict:
         "nodes_by_address": {n.get("address"): n for n in nodes},
         "profile_nodes": profile_nodes,
         "hosts": {h["uuid"]: h for h in snapshot.get("hosts", [])},
+        # Подсказка «какой релейный порт куда ведёт», собранная со ВСЕХ хостов,
+        # включая скрытые технические. У каждого релейного туннеля есть такой
+        # двойник на том же адресе и порте, подписанный «→ имя-ноды». Видимые
+        # туннели так подписывать нельзя — их название читают люди.
+        "relay_hints": _relay_hints(snapshot),
         "templates": {t["uuid"]: t for t in snapshot.get("templates", []) if t.get("uuid")},
         "squad_inbounds": {
             uuid
@@ -151,6 +158,21 @@ def _index(snapshot: dict) -> dict:
 
 
 _ARROW = re.compile(r"[→>]\s*([a-zA-Z0-9_-]+)")
+
+
+def _relay_hints(snapshot: dict) -> dict:
+    """Адрес и порт релея -> имя ноды, куда он ведёт.
+
+    Берём из названий хостов. Скрытые тоже: именно они и подписаны, потому что
+    их никто не читает, кроме нас.
+    """
+    hints = {}
+    for host in snapshot.get("hosts", []):
+        match = _ARROW.search(host.get("remark") or "")
+        if not match:
+            continue
+        hints.setdefault((host.get("address") or "", host.get("port")), match.group(1).lower())
+    return hints
 
 
 def _leg(host: dict, index: dict, servers_by_address: dict, servers_by_node: dict) -> dict:
@@ -175,11 +197,20 @@ def _leg(host: dict, index: dict, servers_by_address: dict, servers_by_node: dic
         exit_node, source = candidates[0], "профиль"
     else:
         match = _ARROW.search(host.get("remark") or "")
-        if match:
-            token = match.group(1).lower()
+        token = match.group(1).lower() if match else ""
+        source_name = "название"
+        if not token:
+            # Своей пометки нет — смотрим у технического двойника на том же
+            # адресе и порте. Без этого семь «Обходов глушилок» показывали нули
+            # при живом трафике: их инбаунд живёт на четырёх нодах, по профилю
+            # выход не определить, а подписывать видимое название служебной
+            # стрелкой нельзя — его читают люди.
+            token = index.get("relay_hints", {}).get((address, host.get("port")), "")
+            source_name = "двойник"
+        if token:
             for node in candidates:
                 if (node.get("name") or "").lower().startswith(token):
-                    exit_node, source = node, "название"
+                    exit_node, source = node, source_name
                     break
 
     entry_server = servers_by_address.get(address)
@@ -335,7 +366,8 @@ def _tunnel(host: dict, index: dict, servers_by_address: dict, servers_by_node: 
         if not leg["exit"]["node"]:
             notes.append(
                 f"выход {leg['tag']}: по данным панели не понять, на какой сервер ведёт релей "
-                f"{leg['address']}:{leg['port']} — допишите в название хоста «→ имя-ноды»"
+                f"{leg['address']}:{leg['port']} — допишите «→ имя-ноды» в название скрытого "
+                f"хоста с тем же адресом и портом (видимое название трогать не нужно)"
             )
         if not leg["served"]:
             problems.append(f"выход {leg['tag']}: инбаунд {leg['inbound']} никому не раздаётся")
@@ -482,10 +514,26 @@ def _to_rub(monthly: dict[str, float]):
     return round(total, 2)
 
 
+def _cert_soonest(cert_info: dict) -> dict | None:
+    """Нода, у которой сертификат кончится раньше всех."""
+    best = None
+    for node, info in (cert_info or {}).items():
+        days = info.get("days")
+        if days is None:
+            continue
+        if best is None or days < best["days"]:
+            best = {"node": node, "days": days, "until": info.get("until"),
+                    "host": info.get("host")}
+    return best
+
+
 def servers(snapshot: dict, rows: list[dict]) -> dict:
     """Наши серверы с прикрученной к ним живой статистикой панели."""
     nodes = {n.get("name"): n for n in snapshot.get("nodes", [])}
     today = timezone.localdate()
+    # Сроки сертификатов берём из кэша: их наполняет задача по расписанию.
+    # Ходить по сети на показе страницы нельзя — шесть нод по пять секунд.
+    cert_info = certs.known()
     # Считаем по каждой валюте отдельно: у нас есть счета и в рублях, и в евро,
     # а складывать их одной цифрой значило бы рисовать число, которого нет.
     monthly: dict[str, float] = {}
@@ -546,6 +594,10 @@ def servers(snapshot: dict, rows: list[dict]) -> dict:
             "is_active": bool(row.get("is_active")),
             "costs": row.get("costs") or [],
             "note": row.get("note") or "",
+            # Сертификат: не у всех он вообще есть. У cs1 его нет по делу — там
+            # только REALITY по адресу, а не TLS на нашем имени. Поэтому «нет
+            # записи» и «не дозвонились» показываем по-разному.
+            "cert": cert_info.get(row.get("panel_node_name") or ""),
         })
 
     out.sort(key=lambda s: (not s["is_active"], s["role_key"], s["name"]))
@@ -558,6 +610,10 @@ def servers(snapshot: dict, rows: list[dict]) -> dict:
         "soonest": {"name": soonest["name"], "date": soonest["date"].isoformat(),
                     "day": soonest["day"], "days": soonest["days"]}
         if soonest else None,
+        # Самый близкий срок сертификата по всем нодам: его легко не заметить в
+        # таблице, а просроченный ломает gRPC, Trojan и Hysteria2 разом.
+        "cert_soonest": _cert_soonest(cert_info),
+        "cert_alarm_days": certs.ALARM_DAYS,
     }
 
 

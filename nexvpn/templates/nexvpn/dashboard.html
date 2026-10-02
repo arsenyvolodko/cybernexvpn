@@ -1281,6 +1281,22 @@ function srvAlive(row) {
          (row.alive ? "на связи" : "не отвечает");
 }
 
+// Сертификат в таблице. Три разных «ничего» нельзя показывать одинаково:
+// «не проверяли» (задача ещё не ходила), «нет TLS на нашем имени» (так у cs1,
+// он отдаёт только REALITY по адресу) и «не дозвонились» — последнее уже повод
+// идти смотреть, а не прочерк.
+function srvCert(row, alarmDays) {
+  const c = row.cert;
+  if (!c) return '<span class="muted" title="У этого сервера нет TLS на нашем имени — либо он не нода, либо отдаёт только REALITY по адресу">—</span>';
+  if (!c.reachable) return '<span class="pill warn" title="Вход не ответил на рукопожатие">молчит</span>';
+  if (c.days === null || c.days === undefined) return '<span class="muted">—</span>';
+  const text = c.days + " дн. · " + fmtDate(c.until);
+  const hint = "Имя в сертификате: " + (c.name || "?") + ", проверено на " + (c.host || "?");
+  return c.days <= (alarmDays || 21)
+    ? '<span class="pill warn" title="' + esc(hint) + '">' + esc(text) + "</span>"
+    : '<span title="' + esc(hint) + '">' + esc(text) + "</span>";
+}
+
 function drawServers(data) {
   // Без округления: 12,50 € и 430 ₽ — это разные суммы, и подменять их
   // на «13» и «430» в таблице, по которой сверяют счета, нельзя.
@@ -1309,6 +1325,15 @@ function drawServers(data) {
       hint: data.dead ? data.dead + " не отвечает" : "Все ноды панели отвечают" },
     { title: "Серверов всего", value: fmtInt(data.rows.length),
       hint: "Включая те, что нодами не являются: прод, панель, релеи, зеркало подписки." },
+    // Просроченный сертификат ломает gRPC, Trojan и Hysteria2 разом, причём
+    // молча: нода остаётся «на связи», а рукопожатие у людей не проходит.
+    { title: "Сертификат кончится", value: data.cert_soonest
+        ? "через " + data.cert_soonest.days + " дн." : "—",
+      hint: data.cert_soonest
+        ? data.cert_soonest.node + " (" + data.cert_soonest.host + "), до " +
+          fmtDate(data.cert_soonest.until) +
+          ". Проверяется рукопожатием снаружи, как это видит приложение человека."
+        : "Обход ещё не отработал. Он идёт раз в шесть часов." },
   ], null, null);
 
   const roles = [...new Set(data.rows.map((r) => r.role).filter(Boolean))];
@@ -1339,6 +1364,8 @@ function drawServers(data) {
                   '">' + money(r.extra, r.currency) + "</span>" : "—" },
     { title: "Итого", num: true, sort: (r) => r.total, cell: (r) => money(r.total, r.currency) },
     { title: "Продлить", sort: (r) => (r.renew_at ? Date.parse(r.renew_at) : null), cell: srvDue },
+    { title: "Сертификат", sort: (r) => (r.cert && r.cert.days !== null && r.cert.days !== undefined ? r.cert.days : null),
+      cell: (r) => srvCert(r, data.cert_alarm_days) },
   ], rows);
 }
 

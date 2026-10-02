@@ -48,6 +48,13 @@ ENTRY_TITLE = {
     "atlex": "Atlex", "timeweb": "Timeweb", "eurobyte_a": "EuroByte",
     "eurobyte_b": "EuroByte 2", "direct": "напрямую",
 }
+# Узлы-цепочки: они обрывают клиента на себе и идут дальше на зарубежный выход.
+# В панели хост такого туннеля привязан к самой цепочке, а в данных выход стоит
+# настоящий — тот, куда цепочка ушла. Ключи из-за этого не совпадали, и все
+# туннели через ru2 показывали нули. Для них ищем по связке «вход + протокол»,
+# не глядя на выход: маршрут задан правилом, выход у связки всё равно один.
+CHAIN_NODES = {"ru2-eurobyte"}
+
 # Порядок колонок — от самых ходовых к редким, чтобы таблица читалась слева направо.
 PROTO_ORDER = ["reality", "grpc", "hysteria_obfs", "trojan_or_vk",
                "hysteria", "grpc_alt", "ru_reality", "reality_google"]
@@ -143,6 +150,13 @@ def tunnel_matrix(since, until, snapshot=None):
     blueprint = infra.blueprint(snapshot)
     acc = totals(since, until)
     days = observed_days(since, until)
+    # Для узлов-цепочек выход в данных не тот, что в панели, см. CHAIN_NODES.
+    by_entry_proto = {}
+    for (entry, _exit, proto), cell in acc.items():
+        slot = by_entry_proto.setdefault((entry, proto),
+                                         {"bytes": 0, "users": set()})
+        slot["bytes"] += cell["bytes"]
+        slot["users"].update(cell["users"])
 
     protocols, rows = set(), []
     for tunnel in blueprint.get("tunnels", []):
@@ -155,7 +169,10 @@ def tunnel_matrix(since, until, snapshot=None):
             exit_node = (leg.get("exit") or {}).get("node")
             if not proto or not exit_node:
                 continue
-            cell = acc.get((entry, exit_node, proto))
+            if exit_node in CHAIN_NODES:
+                cell = by_entry_proto.get((entry, proto))
+            else:
+                cell = acc.get((entry, exit_node, proto))
             if not cell:
                 continue
             protocols.add(proto)

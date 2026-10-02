@@ -61,6 +61,25 @@ def send_subscription_reminders():
 
 
 @shared_task()
+def check_node_certificates():
+    """Обойти входы нод и запомнить, до какого числа годны их сертификаты.
+
+    Ходим по сети, поэтому не на показе страницы, а по расписанию: дашборд
+    читает готовый результат. Задача же и предупреждает — пишет в журнал,
+    когда до конца меньше трёх недель, то есть автопродление не сработало.
+    """
+    from nexvpn.dashboard import certs
+
+    found = certs.refresh()
+    tight = {n: d.get("days") for n, d in found.items()
+             if d.get("days") is not None and d["days"] <= certs.ALARM_DAYS}
+    silent = [n for n, d in found.items() if not d.get("reachable")]
+    logger.info("Сертификаты нод: проверено %s, на исходе %s, молчат %s",
+                len(found), tight, silent)
+    return {"checked": len(found), "tight": tight, "silent": silent}
+
+
+@shared_task()
 def sync_panel():
     """Догнать подписки, которые не доехали до Remnawave.
 

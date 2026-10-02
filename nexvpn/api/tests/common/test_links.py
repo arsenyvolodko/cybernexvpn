@@ -187,3 +187,75 @@ def test_dashboard_page_carries_the_period_picker(admin_client):
     assert 'id="linkDays"' in html and 'id="linkDays2"' in html
     assert "В среднем" in html
     assert "fmtRate" in html
+
+
+# --- туннели через цепочку ru2 ---
+
+
+@pytest.mark.django_db
+def test_chain_tunnel_finds_its_traffic_despite_a_different_exit(monkeypatch):
+    """Все «Обходы глушилок» через ru2 показывали нули, и это была ошибка связки.
+
+    ru2 обрывает клиента на себе и идёт дальше на зарубежный выход, поэтому в
+    данных у неё стоит настоящий выход цепочки (cs1), а в панели хост туннеля
+    привязан к самой ru2. Ключ поиска не совпадал, и туннель выглядел мёртвым
+    при живом трафике — хуже всего то, что выглядел правдоподобно.
+    """
+    make(TODAY, "eurobyte_a", "cs1-cherryservers", "grpc", bytes_out=500, users=["1", "2"])
+    snapshot = {"hosts": [], "nodes": [], "inbounds": [], "templates": [], "squads": []}
+    blueprint = {"tunnels": [
+        {"title": "Обход глушилок 1 | Моб. интернет", "auto": False, "position": 1, "legs": [
+            {"address": "ru2.pineferry.com", "inbound": "RU2-GRPC-A",
+             "exit": {"node": "ru2-eurobyte"}}]},
+    ]}
+    monkeypatch.setattr(links.infra, "blueprint", lambda *a, **k: blueprint)
+
+    row = links.tunnel_matrix(TODAY, TODAY, snapshot=snapshot)["rows"][0]
+
+    assert row["bytes"] == 500
+    assert row["users"] == 2
+    assert row["cells"]["grpc"] == {"bytes": 500, "users": 2}
+
+
+@pytest.mark.django_db
+def test_chain_lookup_does_not_mix_the_two_entry_addresses(monkeypatch):
+    """У ru2 два адреса, A и B, и это разные туннели в подписке.
+
+    Искать по связке «вход + протокол» можно только потому, что вход различает
+    адреса. Склей их — и трафик одного туннеля утечёт в другой.
+    """
+    make(TODAY, "eurobyte_a", "cs1-cherryservers", "trojan_or_vk", bytes_out=100, users=["1"])
+    make(TODAY, "eurobyte_b", "de2-ghostnet", "trojan_or_vk", bytes_out=900, users=["2", "3"])
+    snapshot = {"hosts": [], "nodes": [], "inbounds": [], "templates": [], "squads": []}
+    blueprint = {"tunnels": [
+        {"title": "Обход 2 (адрес A)", "auto": False, "position": 1, "legs": [
+            {"address": "ru2.pineferry.com", "inbound": "RU2-TROJAN-A",
+             "exit": {"node": "ru2-eurobyte"}}]},
+        {"title": "Обход 5 (адрес B)", "auto": False, "position": 2, "legs": [
+            {"address": "ru2b.pineferry.com", "inbound": "RU2-TROJAN-B",
+             "exit": {"node": "ru2-eurobyte"}}]},
+    ]}
+    monkeypatch.setattr(links.infra, "blueprint", lambda *a, **k: blueprint)
+
+    rows = {r["title"]: r for r in links.tunnel_matrix(TODAY, TODAY, snapshot=snapshot)["rows"]}
+
+    assert rows["Обход 2 (адрес A)"]["bytes"] == 100
+    assert rows["Обход 5 (адрес B)"]["bytes"] == 900
+
+
+@pytest.mark.django_db
+def test_ordinary_tunnel_still_matches_its_own_exit(monkeypatch):
+    """Обычный туннель ищет строго свой выход: иначе сложит все выходы разом."""
+    make(TODAY, "atlex", "de1-ovh", "grpc", bytes_out=10, users=["1"])
+    make(TODAY, "atlex", "pl1-ovh", "grpc", bytes_out=20, users=["2"])
+    snapshot = {"hosts": [], "nodes": [], "inbounds": [], "templates": [], "squads": []}
+    blueprint = {"tunnels": [
+        {"title": "Обход 14", "auto": False, "position": 1, "legs": [
+            {"address": "185.71.198.238", "inbound": "VLESS-GRPC",
+             "exit": {"node": "de1-ovh"}}]},
+    ]}
+    monkeypatch.setattr(links.infra, "blueprint", lambda *a, **k: blueprint)
+
+    row = links.tunnel_matrix(TODAY, TODAY, snapshot=snapshot)["rows"][0]
+
+    assert row["bytes"] == 10, "сложил оба выхода вместо одного"

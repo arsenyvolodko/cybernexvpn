@@ -31,6 +31,12 @@ app.conf.beat_schedule = {
         'task': 'nexvpn.tasks.reconcile_payments',
         'schedule': crontab(minute='*'),
     },
+    # Сроки сертификатов на нодах. Четыре раза в сутки — не потому что они
+    # меняются часто, а чтобы «молчит нода» замечалось в тот же день.
+    'node-certificates': {
+        'task': 'nexvpn.tasks.check_node_certificates',
+        'schedule': crontab(minute=5, hour='*/6'),
+    },
     'usage-snapshot': {
         'task': 'nexvpn.tasks.take_usage_snapshot',
         'schedule': crontab(minute='*/10'),
