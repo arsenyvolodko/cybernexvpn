@@ -10,9 +10,13 @@
 при этом держать в памяти прежний: ровно так и выглядит забытый перезапуск.
 
 Сеть здесь медленная и ненадёжная, поэтому страница в неё не ходит: обходом
-занимается задача по расписанию, результат лежит в кэше, а дашборд его только
-читает. Нет в кэше — честно пишем «не проверяли», а не рисуем прочерк, который
+занимается задача по расписанию, результат лежит в базе, а дашборд его только
+читает. Нет записи — честно пишем «не проверяли», а не рисуем прочерк, который
 легко принять за «сертификат не нужен».
+
+Почему в базе, а не в кэше: кэш у нас локальный для процесса. Задача живёт в
+celery, дашборд — в веб-процессе, и записанное одним второй не увидит никогда.
+Напоролись на это 02.10.2026: обход шёл исправно, а в таблице было пусто.
 """
 
 from __future__ import annotations
@@ -22,14 +26,10 @@ import logging
 import socket
 import ssl
 
-from django.core.cache import cache
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-CACHE_KEY = "node_certificates"
-TTL = 7 * 24 * 3600          # Храним дольше, чем период обхода: лучше вчерашнее
-                             # значение, чем пустая клетка при сбое задачи.
 TIMEOUT = 5
 # Красим, когда до конца меньше этого. Let's Encrypt продлевает за 30 дней, так
 # что три недели — это уже «автопродление не сработало», а не «скоро истекает».
@@ -120,10 +120,44 @@ def refresh() -> dict:
         out[node] = {"checked": True, "reachable": True, "until": first["until"],
                      "days": days, "name": first["name"], "host": first["host"],
                      "endpoints": rows}
-    cache.set(CACHE_KEY, out, TTL)
+    _store(out)
     return out
 
 
+def _store(found: dict) -> None:
+    from nexvpn.models import NodeCertificate
+
+    for node, info in found.items():
+        NodeCertificate.objects.update_or_create(
+            node=node,
+            defaults={
+                "host": info.get("host") or "",
+                "port": (info.get("endpoints") or [{}])[0].get("port"),
+                "common_name": info.get("name") or "",
+                "valid_until": info.get("until") or None,
+                "reachable": bool(info.get("reachable")),
+                "endpoints": info.get("endpoints") or [],
+            },
+        )
+
+
 def known() -> dict:
-    """Что лежит в кэше. Пусто — значит задача ещё не отработала."""
-    return cache.get(CACHE_KEY) or {}
+    """Что известно о сертификатах. Пусто — значит задача ещё не отработала.
+
+    «Сколько осталось дней» считаем здесь, а не храним: сохранённое число
+    устареет к следующему показу страницы и будет врать тем сильнее, чем дольше
+    не было обхода.
+    """
+    from nexvpn.models import NodeCertificate
+
+    today = timezone.localdate()
+    out = {}
+    for row in NodeCertificate.objects.all():
+        info = {"checked": True, "reachable": row.reachable,
+                "host": row.host, "name": row.common_name,
+                "endpoints": row.endpoints or []}
+        if row.valid_until:
+            info["until"] = row.valid_until.isoformat()
+            info["days"] = (row.valid_until - today).days
+        out[row.node] = info
+    return out

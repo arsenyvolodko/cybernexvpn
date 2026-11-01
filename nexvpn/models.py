@@ -1449,6 +1449,40 @@ class LinkUsageDay(models.Model):
         return len(self.users or [])
 
 
+class NodeCertificate(models.Model):
+    """До какого числа годен сертификат на входе ноды.
+
+    Лежит в базе, а не в кэше, и это важно: кэш у нас локальный для процесса —
+    задача по расписанию живёт в celery, а дашборд в веб-процессе, и записанное
+    одним второй не увидит никогда. Напоролись 02.10.2026: задача исправно
+    обходила ноды, а в таблице стояло «не проверяли».
+
+    Заодно это и правильнее по сути: данные нужны редко, меняются раз в два
+    месяца и должны переживать перезапуск.
+    """
+
+    node = models.CharField("нода в панели", max_length=63, unique=True)
+    host = models.CharField("проверено на", max_length=127, blank=True, default="")
+    port = models.PositiveIntegerField("порт", null=True, blank=True)
+    common_name = models.CharField("имя в сертификате", max_length=127, blank=True, default="")
+    valid_until = models.DateField("годен до", null=True, blank=True)
+    # Отдельно от «годен до»: молчащий вход — это не «срок неизвестен», а повод
+    # идти смотреть. В таблице это разные состояния.
+    reachable = models.BooleanField("вход ответил", default=True)
+    endpoints = models.JSONField("все проверенные имена", default=list, blank=True)
+    checked_at = models.DateTimeField("когда проверяли", auto_now=True)
+
+    class Meta:
+        verbose_name = "сертификат ноды"
+        verbose_name_plural = "Сертификаты нод"
+        ordering = ["valid_until", "node"]
+
+    def __str__(self):
+        if not self.reachable:
+            return f"{self.node}: вход не ответил"
+        return f"{self.node}: до {self.valid_until}"
+
+
 class SubHostProbe(models.Model):
     """Проверка адреса выдачи подписки, выполненная на устройстве человека.
 

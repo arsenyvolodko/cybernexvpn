@@ -152,6 +152,76 @@ def test_short_reminder_survives_a_scheduled_downgrade(monkeypatch, plan):
     assert bot.sent == [subscription.user_id]
 
 
+class RecordingBot:
+    def __init__(self):
+        self.sent = []
+
+    async def send_message(self, chat_id, text, reply_markup=None):
+        self.sent.append((chat_id, text))
+
+
+def _mark_every_offset_for_previous_period(subscription):
+    from bot.notifications import EXPIRY_OFFSET
+
+    previous = subscription.expires_at - timedelta(days=20)
+    for hours in [*OFFSETS, EXPIRY_OFFSET]:
+        SentReminder.objects.create(subscription=subscription, hours_before=hours, expires_at=previous)
+
+
+@override_settings(SUBSCRIPTION_REMINDER_HOURS=OFFSETS)
+def test_admin_edit_of_expiry_does_not_silence_reminders(plan):
+    """Регрессия: срок сдвинули в админке, отметки прошлого периода остались.
+
+    На проде 31.10.2026 подписка владельца закончилась без единого напоминания:
+    все смещения числились отправленными по периоду, истёкшему 11.10.
+    """
+    from asgiref.sync import async_to_sync
+
+    from bot.notifications import send_due_reminders
+
+    subscription = expiring_in(2, plan)
+    _mark_every_offset_for_previous_period(subscription)
+    bot = RecordingBot()
+
+    sent, failed = async_to_sync(send_due_reminders)(bot)
+
+    assert (sent, failed) == (1, 0)
+    assert [chat_id for chat_id, _ in bot.sent] == [subscription.user_id]
+
+
+@override_settings(SUBSCRIPTION_REMINDER_HOURS=OFFSETS)
+def test_admin_edit_of_expiry_does_not_silence_ended_notice(plan):
+    """Та же уборка нужна сообщению об окончании: его отметка лежит в той же таблице."""
+    from asgiref.sync import async_to_sync
+
+    from bot.notifications import send_due_expiry_notices, send_due_reminders
+
+    subscription = expiring_in(-2, plan)
+    _mark_every_offset_for_previous_period(subscription)
+    bot = RecordingBot()
+
+    async_to_sync(send_due_reminders)(bot)
+    sent, failed = async_to_sync(send_due_expiry_notices)(bot)
+
+    assert (sent, failed) == (1, 0)
+    assert [chat_id for chat_id, _ in bot.sent] == [subscription.user_id]
+
+
+@override_settings(SUBSCRIPTION_REMINDER_HOURS=OFFSETS)
+def test_cleanup_keeps_marks_of_the_current_period(plan):
+    """Иначе человек получал бы одно и то же напоминание каждые десять минут."""
+    from asgiref.sync import async_to_sync
+
+    from bot.notifications import send_due_reminders
+
+    expiring_in(2, plan)
+    bot = RecordingBot()
+
+    assert async_to_sync(send_due_reminders)(bot) == (1, 0)
+    assert async_to_sync(send_due_reminders)(bot) == (0, 0)
+    assert len(bot.sent) == 1
+
+
 @override_settings(SUBSCRIPTION_REMINDER_HOURS=OFFSETS)
 def test_renewal_resets_reminders(plan):
     """Начался новый период — напоминать по нему надо заново."""

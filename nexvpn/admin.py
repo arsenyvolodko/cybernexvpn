@@ -19,6 +19,7 @@ from nexvpn.models import (
     InboundUsageDay,
     LegacyMigrationRecord,
     NexUser,
+    NodeCertificate,
     NodeUsageDay,
     PanelPresence,
     Payment,
@@ -577,6 +578,25 @@ class InboundUsageDayAdmin(admin.ModelAdmin):
     list_display = ("date", "inbound_tag", "node_name", "via_relay", "user", "connections", "last_seen")
     list_filter = ("inbound_tag", "node_name", "via_relay", "date")
     search_fields = ("user__username", "user__pk")
+
+
+@admin.register(NodeCertificate)
+class NodeCertificateAdmin(admin.ModelAdmin):
+    """Сроки сертификатов на входах нод. Заполняет задача по расписанию.
+
+    Руками тут ничего не правим: запись — это снимок того, что отдал сервер.
+    Поправить её значило бы соврать себе о сроке.
+    """
+
+    list_display = ("node", "common_name", "valid_until", "reachable", "host", "checked_at")
+    list_filter = ("reachable",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
 
 
 @admin.register(SubHostProbe)

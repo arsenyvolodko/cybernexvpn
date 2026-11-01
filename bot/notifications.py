@@ -15,6 +15,7 @@ from datetime import timedelta
 from aiogram.exceptions import TelegramAPIError, TelegramRetryAfter
 from django.conf import settings
 from django.db import IntegrityError
+from django.db.models import F
 from django.utils.timezone import now
 
 from bot import texts
@@ -26,6 +27,21 @@ from nexvpn.subscription import panel_sync
 logger = logging.getLogger(__name__)
 
 DELAY_BETWEEN_MESSAGES = 0.05
+
+
+def clear_stale_marks() -> int:
+    """Снять отметки, выданные на другую дату окончания.
+
+    `grant_days` и смена тарифа чистят отметки сами, а правка срока в админке —
+    нет. Без этой уборки человек, которому продлили подписку руками, не получал
+    ни напоминаний, ни сообщения об окончании: все смещения числились
+    отправленными по прошлому периоду.
+
+    Удаляем, а не просто не учитываем: уникальный индекс не даст создать новую
+    отметку, и отправка молча сорвётся на `IntegrityError`.
+    """
+    deleted, _ = SentReminder.objects.exclude(expires_at=F("subscription__expires_at")).delete()
+    return deleted
 
 
 def due_reminders() -> list[tuple[Subscription, int]]:
@@ -269,6 +285,9 @@ async def send_due_reminders(bot) -> tuple[int, int]:
     import asyncio
 
     from asgiref.sync import sync_to_async
+
+    # До выборки: задача следом шлёт и сообщения об окончании, им уборка нужна тоже.
+    await sync_to_async(clear_stale_marks)()
 
     pending = await sync_to_async(due_reminders)()
     if not pending:

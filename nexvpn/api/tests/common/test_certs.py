@@ -10,17 +10,14 @@
 import datetime as dt
 
 import pytest
-from django.core.cache import cache
 from django.utils import timezone
 
 from nexvpn.dashboard import certs
+from nexvpn.models import NodeCertificate
 
-
-@pytest.fixture(autouse=True)
-def clean_cache():
-    cache.delete(certs.CACHE_KEY)
-    yield
-    cache.delete(certs.CACHE_KEY)
+# Всё здесь ходит в базу: результат обхода там и живёт. В кэше его держать
+# нельзя — кэш локален для процесса, и дашборд не увидел бы записанное celery.
+pytestmark = pytest.mark.django_db
 
 
 def fake_probe(answers):
@@ -34,7 +31,7 @@ def days_from_now(n):
     return (timezone.localdate() + dt.timedelta(days=n)).isoformat()
 
 
-def test_nothing_in_cache_means_not_checked_yet():
+def test_nothing_stored_means_not_checked_yet():
     assert certs.known() == {}
 
 
@@ -67,8 +64,12 @@ def test_silent_node_is_told_apart_from_a_fresh_one(monkeypatch):
     assert "until" not in found
 
 
-def test_result_is_cached_for_the_dashboard(monkeypatch):
-    """Страница в сеть не ходит: шесть нод по пять секунд её бы заморозили."""
+def test_result_is_stored_for_the_dashboard(monkeypatch):
+    """Страница в сеть не ходит: шесть нод по пять секунд её бы заморозили.
+
+    И хранится это в базе, а не в кэше: задача живёт в celery, дашборд — в
+    веб-процессе, у них разные процессы и разный локальный кэш.
+    """
     monkeypatch.setattr(certs, "probe", fake_probe({
         ("de1.pineferry.com", 7443): {"host": "de1.pineferry.com", "port": 7443,
                                       "name": "de1.pineferry.com", "until": days_from_now(60)}}))
@@ -77,6 +78,7 @@ def test_result_is_cached_for_the_dashboard(monkeypatch):
     certs.refresh()
 
     assert certs.known()["de1-ovh"]["days"] == 60
+    assert NodeCertificate.objects.get(node="de1-ovh").common_name == "de1.pineferry.com"
 
 
 def test_task_reports_nodes_whose_renewal_did_not_happen(monkeypatch):
@@ -127,15 +129,13 @@ def server_rows():
     ]
 
 
-@pytest.mark.django_db
 def test_servers_block_shows_the_certificate(monkeypatch, panel_snapshot, server_rows):
     """Срок должен попадать в ту же таблицу, по которой сверяют счета."""
     from nexvpn.dashboard import infra
 
-    cache.set(certs.CACHE_KEY, {
-        "de1-ovh": {"checked": True, "reachable": True, "until": days_from_now(12),
-                    "days": 12, "name": "de1.pineferry.com", "host": "de1.pineferry.com"},
-    }, 60)
+    NodeCertificate.objects.create(
+        node="de1-ovh", host="de1.pineferry.com", port=7443,
+        common_name="de1.pineferry.com", valid_until=days_from_now(12), reachable=True)
 
     block = infra.servers(panel_snapshot, server_rows)
     rows = {r["name"]: r for r in block["rows"]}
@@ -147,9 +147,23 @@ def test_servers_block_shows_the_certificate(monkeypatch, panel_snapshot, server
     assert block["cert_alarm_days"] == certs.ALARM_DAYS
 
 
-@pytest.mark.django_db
 def test_dashboard_page_carries_the_certificate_column(admin_client):
     html = admin_client.get("/dash/").content.decode()
 
     assert "Сертификат" in html
     assert "srvCert" in html
+
+
+def test_days_are_recomputed_not_stored(monkeypatch):
+    """Хранить «осталось дней» нельзя: число устареет к следующему показу.
+
+    Если обход не отработал неделю, сохранённое «осталось 30» будет врать на
+    семь дней — и врать в опасную сторону, преувеличивая запас.
+    """
+    import datetime as dt
+
+    NodeCertificate.objects.create(
+        node="de1-ovh", host="de1.pineferry.com", common_name="de1.pineferry.com",
+        valid_until=timezone.localdate() + dt.timedelta(days=3), reachable=True)
+
+    assert certs.known()["de1-ovh"]["days"] == 3
