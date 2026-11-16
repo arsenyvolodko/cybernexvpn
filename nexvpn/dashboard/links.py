@@ -28,6 +28,8 @@ ENTRY_BY_ADDRESS = {
     "95.142.44.105": "eurobyte_a",
     "ru2b.pineferry.com": "eurobyte_b",
     "185.105.109.159": "eurobyte_b",
+    "87.242.100.72": "cloudru",
+    "146.185.211.28": "vkcloud",
 }
 PROTO_BY_INBOUND = {
     "VLESS-REALITY": "reality", "VLESS-GRPC": "grpc", "VLESS-REALITY-VK": "trojan_or_vk",
@@ -38,26 +40,36 @@ PROTO_BY_INBOUND = {
     "RU2-GRPC-A": "grpc", "RU2-GRPC-B": "grpc_alt",
     "RU2-TROJAN-A": "trojan_or_vk", "RU2-TROJAN-B": "trojan_or_vk",
     "RU2-HY2-A": "hysteria_obfs", "RU2-HY2-B": "hysteria_obfs",
+    # ru3 (Cloud.ru): четыре gRPC+REALITY на разных портах, ярлык несёт порт,
+    # иначе четыре туннеля легли бы в одну ячейку.
+    "RU3-GRPC-A": "grpc_443", "RU3-GRPC-B": "grpc_1443", "RU3-TCP-C": "reality",
+    "RU3-GRPC-D": "grpc_8443", "RU3-GRPC-E": "grpc_3443",
+    # vk1 (VK Cloud): копия ru3, те же порты и ярлыки.
+    "VK-GRPC-A": "grpc_443", "VK-GRPC-B": "grpc_1443", "VK-TCP-C": "reality",
+    "VK-GRPC-D": "grpc_8443", "VK-GRPC-E": "grpc_3443",
+    "SE-VLESS-REALITY": "reality",
 }
 PROTO_TITLE = {
     "reality": "REALITY", "ru_reality": "REALITY (РФ)", "reality_google": "REALITY Google",
     "grpc": "gRPC", "grpc_alt": "gRPC 8080", "trojan_or_vk": "Trojan / VK",
     "hysteria": "Hysteria2", "hysteria_obfs": "Hysteria2 обф.",
+    "grpc_443": "gRPC+REALITY :443", "grpc_1443": "gRPC+REALITY :1443",
+    "grpc_8443": "gRPC+REALITY :8443", "grpc_3443": "gRPC+REALITY :3443",
 }
 ENTRY_TITLE = {
     "atlex": "Atlex", "timeweb": "Timeweb", "eurobyte_a": "EuroByte",
-    "eurobyte_b": "EuroByte 2", "direct": "напрямую",
+    "eurobyte_b": "EuroByte 2", "cloudru": "Cloud.ru", "vkcloud": "VK Cloud", "direct": "напрямую",
 }
 # Узлы-цепочки: они обрывают клиента на себе и идут дальше на зарубежный выход.
 # В панели хост такого туннеля привязан к самой цепочке, а в данных выход стоит
 # настоящий — тот, куда цепочка ушла. Ключи из-за этого не совпадали, и все
 # туннели через ru2 показывали нули. Для них ищем по связке «вход + протокол»,
 # не глядя на выход: маршрут задан правилом, выход у связки всё равно один.
-CHAIN_NODES = {"ru2-eurobyte"}
+CHAIN_NODES = {"ru2-eurobyte", "ru3-cloudru", "vk1-vkcloud"}
 
 # Порядок колонок — от самых ходовых к редким, чтобы таблица читалась слева направо.
-PROTO_ORDER = ["reality", "grpc", "hysteria_obfs", "trojan_or_vk",
-               "hysteria", "grpc_alt", "ru_reality", "reality_google"]
+PROTO_ORDER = ["reality", "grpc", "grpc_443", "grpc_1443", "grpc_8443", "grpc_3443",
+               "hysteria_obfs", "trojan_or_vk", "hysteria", "grpc_alt", "ru_reality", "reality_google"]
 
 
 def _rows(since, until):

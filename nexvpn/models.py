@@ -1406,6 +1406,8 @@ class LinkUsageDay(models.Model):
         TIMEWEB = "timeweb", "Timeweb (Россия)"
         EUROBYTE_A = "eurobyte_a", "EuroByte (Россия)"
         EUROBYTE_B = "eurobyte_b", "EuroByte 2 (Россия)"
+        CLOUDRU = "cloudru", "Cloud.ru (Россия)"
+        VKCLOUD = "vkcloud", "VK Cloud (Россия)"
         DIRECT = "direct", "Напрямую, без прослойки"
 
     date = models.DateField("дата")
